@@ -267,8 +267,10 @@ final class AzureReader {
         JSONArray pages = contents.getJSONObject(0).optJSONArray("pages");
         JSONObject page = pages == null ? null : pages.optJSONObject(0);
         double angle = page == null ? 0 : page.optDouble("angle", 0);
+        JSONObject details = new JSONObject();
+        if (type.code.equals("id_back")) details.put("Barcode", PageBarcode.lowerLeft(page));
         return new Reading(type, String.join("\n\n", blocks), structured && fields == null ? new JSONObject() : fields,
-                new JSONObject(), angle);
+                details, angle);
     }
 
     private static String contentText(JSONObject content) {

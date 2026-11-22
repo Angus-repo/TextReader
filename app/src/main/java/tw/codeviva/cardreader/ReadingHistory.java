@@ -88,6 +88,24 @@ final class ReadingHistory extends SQLiteOpenHelper {
     AzureReader.Reading get(String id) throws JSONException {
         return decode(new JSONObject(record(getReadableDatabase(), id)));
     }
+    void completeBarcode(String id, String value) throws JSONException {
+        if (value == null || value.isEmpty()) return;
+        SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
+        try {
+            JSONObject item = new JSONObject(record(db, id));
+            if (!"id_back".equals(item.getJSONObject("type").optString("code"))) return;
+            JSONObject details = item.optJSONObject("local");
+            if (details == null) details = new JSONObject();
+            if (!details.optString("Barcode").isEmpty()) return;
+            item.put("local", details.put("Barcode", value));
+            db.execSQL("UPDATE readings SET record=? WHERE id=?", new Object[]{item.toString(), id});
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
     private static AzureReader.Reading decode(JSONObject item) throws JSONException {
         CardCatalog.Card type = new CardCatalog.Card(item.getJSONObject("type"));
         for (int i = 0; i < type.fields.length(); i++) {

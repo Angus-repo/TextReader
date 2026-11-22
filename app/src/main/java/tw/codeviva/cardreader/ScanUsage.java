@@ -145,32 +145,13 @@ final class ScanUsage {
         String tokens = usage.has("tokens") ? (usage.optBoolean("partialTokens") ? "已知 " : "")
                 + NumberFormat.getIntegerInstance(Locale.TAIWAN).format(usage.optLong("tokens")) + " tokens" : "Token 未回報";
         if (usage.optBoolean("partialTokens") && usage.optLong("tokens", 0) == 0) tokens = "Token 未完整回報";
-        String time = String.format(Locale.TAIWAN, "%.2f 秒", usage.optLong("elapsedMs") / 1000.0);
+        String time = timeText(usage);
         String price = usage.has("usd") ? (usage.optBoolean("partialCost") ? "已知小計 " : "估計 ")
                 + "US$" + usage.optString("usd") : "費用未取得";
         return tokens + " · " + time + " · " + price;
     }
 
-    static String breakdown(JSONObject u) {
-        StringBuilder out = new StringBuilder(summary(u));
-        JSONArray ops = u.optJSONArray("operations");
-        if (ops != null) for (int i=0; i<ops.length(); i++) {
-            JSONObject op = ops.optJSONObject(i);
-            if (op == null) continue;
-            out.append("\n").append(op.optString("stage")).append("　");
-            if (op.has("input")) out.append("輸入 ").append(op.optLong("input")).append("　");
-            if (op.has("output")) out.append("輸出 ").append(op.optLong("output")).append("　");
-            if (op.has("pages")) out.append(op.optLong("pages")).append(op.optBoolean("inferredPages") ? " 頁（依上傳影像估計）　" : " 頁　");
-            if (op.has("contextTokens")) out.append("情境 ").append(op.optLong("contextTokens")).append(" tokens　");
-            out.append(op.has("usd") ? "US$" + op.optString("usd") : "費用未取得");
-            JSONObject meters = op.optJSONObject("modelTokens");
-            if (meters != null) for (Iterator<String> it = meters.keys(); it.hasNext();) {
-                String key = it.next();
-                out.append("\n　").append(key).append("　").append(meters.optLong(key)).append(" tokens");
-            }
-        }
-        out.append("\n").append(u.optString("rateBasis")).append("。耗時只計算實際處理時間。");
-        if (u.optBoolean("partialCost")) out.append("部分用量或單價未取得，小計僅含已知項目。");
-        return out.toString();
+    static String timeText(JSONObject usage) {
+        return String.format(Locale.TAIWAN, "%.2f 秒", usage.optLong("elapsedMs") / 1000.0);
     }
 }

@@ -8,6 +8,7 @@ import com.google.zxing.BinaryBitmap;
 import com.google.zxing.DecodeHintType;
 import com.google.zxing.ReaderException;
 import com.google.zxing.RGBLuminanceSource;
+import com.google.zxing.common.BitArray;
 import com.google.zxing.common.GlobalHistogramBinarizer;
 import com.google.zxing.common.HybridBinarizer;
 import com.google.zxing.oned.MultiFormatOneDReader;
@@ -132,7 +133,7 @@ final class IdCardDetails {
         if (front && !needSex && !needId) return;
         Bitmap source = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length);
         if (source == null) {
-            if (back) reading.local.put("Barcode", "");
+            if (back && !reading.local.has("Barcode")) reading.local.put("Barcode", "");
             return;
         }
         Bitmap upright = source;
@@ -150,7 +151,9 @@ final class IdCardDetails {
                 } catch (RuntimeException invalidImage) {
                     // Failure to read the optional bar region must not discard the Azure transcript.
                 }
-                reading.local.put("Barcode", value);
+                String cloud = reading.local.optString("Barcode");
+                if (cloud.isEmpty()) reading.local.put("Barcode", value);
+                else if (!value.isEmpty() && !value.equals(cloud)) reading.local.put("Barcode", "");
             }
             boolean needService = back && reading.type.fieldLabel("MilitaryService") != null
                     && serviceValue(cloudValue(reading, "MilitaryService")).isEmpty() && militaryService(text).isEmpty();
@@ -259,7 +262,7 @@ final class IdCardDetails {
         }
     }
 
-    private static String decodeBars(Bitmap image) {
+    static String decodeBars(Bitmap image) {
         int w = image.getWidth(), h = image.getHeight();
         int[] pixels = new int[w * h];
         image.getPixels(pixels, 0, w, 0, 0, w, h);
@@ -271,8 +274,46 @@ final class IdCardDetails {
             try {
                 return decoder.decode(new BinaryBitmap(new GlobalHistogramBinarizer(source)), BARCODE_HINTS).getText();
             } catch (ReaderException unreadable) {
-                return "";
+                return contrastRows(source, decoder, w, h);
             }
         }
+    }
+
+    // Average parallel rows to suppress speckle, then threshold against nearby bars
+    // and spaces. This preserves narrow stripes across shadows on laminated cards.
+    private static String contrastRows(RGBLuminanceSource source, MultiFormatOneDReader decoder, int w, int h) {
+        if (w < 32 || h < 5) return "";
+        byte[] gray = source.getMatrix();
+        int[] profile = new int[w];
+        int radius = Math.max(12, Math.min(48, w / 30));
+        BitArray bits = new BitArray(w);
+        String previous = "";
+        for (int y = 2; y < h - 2; y += Math.max(2, h / 42)) {
+            for (int x = 0; x < w; x++) {
+                int i = y * w + x;
+                profile[x] = ((gray[i - w] & 255) + 2 * (gray[i] & 255) + (gray[i + w] & 255)) / 4;
+            }
+            bits.clear();
+            for (int start = 0; start < w; start += radius) {
+                int lo = 255, hi = 0;
+                for (int x = Math.max(0, start - radius); x < Math.min(w, start + 2 * radius); x++) {
+                    lo = Math.min(lo, profile[x]);
+                    hi = Math.max(hi, profile[x]);
+                }
+                if (hi - lo < 12) continue;
+                for (int x = start; x < Math.min(w, start + radius); x++)
+                    if (2 * profile[x] < lo + hi) bits.set(x);
+            }
+            try {
+                String value = decoder.decodeRow(y, bits, BARCODE_HINTS).getText();
+                if (value.equals(previous)) return value;
+                previous = value;
+            } catch (ReaderException unreadable) {
+                // Other rows may avoid glare or printed text crossing the stripes.
+            } finally {
+                decoder.reset();
+            }
+        }
+        return "";
     }
 }

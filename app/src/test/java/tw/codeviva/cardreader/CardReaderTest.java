@@ -42,7 +42,7 @@ public class CardReaderTest {
         assertFalse(saved.getBoolean("partialCost"));
         assertFalse(saved.getBoolean("partialTokens"));
         assertTrue(ScanUsage.summary(saved).contains("2.80 秒"));
-        assertTrue(ScanUsage.breakdown(saved).contains("gpt-5.2-output"));
+        assertTrue(visibleText(new UsagePanel(new ReaderScreen(RuntimeEnvironment.getApplication())).show(saved)).contains("gpt-5.2-output"));
         config.decisionRate = "0.05";
         config.openAI = false;
         JSONObject another = new JSONObject();
@@ -67,7 +67,7 @@ public class CardReaderTest {
         JSONObject result = plain.snapshot();
         assertEquals("0.001",result.getString("usd"));
         assertEquals(0,result.getLong("tokens"));
-        assertTrue(ScanUsage.breakdown(result).contains("依上傳影像估計"));
+        assertTrue(visibleText(new UsagePanel(new ReaderScreen(RuntimeEnvironment.getApplication())).show(result)).contains("依上傳影像估計"));
         config.cuModel="new-model"; config.completionOutput="2";
         JSONObject op = new JSONObject();
         ScanUsage.document(op,obj("documentPagesBasic",1,"contextualizationTokens",1000,"tokens",obj("new-model-output",500)),true,"custom",config);
@@ -100,6 +100,86 @@ public class CardReaderTest {
             assertEquals(reading.usage.toString(),store.get(added).usage.toString());
             assertNull(store.get(id).usage);
         }
+    }
+
+    @Test public void onlyPositionedLinearAzureBarcodesOnTheUprightLowerLeftAreUsed() throws Exception {
+        JSONObject bar = obj("kind","Code39","value","C012300007","source","D(1,10,65,56,65,56,77,10,77)");
+        JSONObject distractor = obj("kind","Code39","value","0000000105","source","D(1,70,67,99,67,99,78,70,78)");
+        JSONObject qr = new JSONObject(bar.toString()).put("kind","QRCode").put("value","different");
+        JSONArray list = new JSONArray().put(qr).put(distractor).put(bar);
+        JSONObject page = obj("width",100,"height",100,"pageNumber",1,"barcodes",list);
+        JSONObject result = obj("contents",new JSONArray().put(obj("pages",new JSONArray().put(page))));
+        AzureReader api = new AzureReader(catalog,config,(m,u,h,k,b) -> m.equals("POST") ?
+                reply(202,OP,obj()) : reply(200,null,obj("status","Succeeded","result",result)), ms -> {});
+        AzureReader.Reading read = api.read(catalog.cards.get("id_back"),new byte[]{1},false,msg -> {});
+        IdCardDetails.readImage(RuntimeEnvironment.getApplication(), read, new byte[]{0});
+        assertEquals("C012300007",read.local.getString("Barcode"));
+        assertTrue(catalog.cards.get("id_back").schema(config.cuModel).getJSONObject("config").getBoolean("enableBarcode"));
+        assertEquals("",PageBarcode.lowerLeft(page.put("angle",180)));
+        page.put("angle", 90);
+        bar.put("source","D(1,12,20,35,20,35,42,12,42)");
+        assertEquals("C012300007",PageBarcode.lowerLeft(page));
+        list.put(new JSONObject(bar.toString()).put("value","B123000000"));
+        assertEquals("",PageBarcode.lowerLeft(page));
+    }
+
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    public void lowContrastBarsUnderUnevenLightPreserveTheExactContent() throws Exception {
+        String payload = "F012340065";
+        int w = 640, h = 70;
+        com.google.zxing.common.BitMatrix bars = new com.google.zxing.oned.Code39Writer().encode(
+                payload, com.google.zxing.BarcodeFormat.CODE_39, w, h);
+        int[] pixels = new int[w * h];
+        for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
+            int gray = 128 + x / 13 - (bars.get(x,y) ? 20 : 0);
+            pixels[y*w+x] = android.graphics.Color.rgb(gray,gray,gray);
+        }
+        android.graphics.Bitmap strip = android.graphics.Bitmap.createBitmap(pixels,w,h,android.graphics.Bitmap.Config.ARGB_8888);
+        try { assertEquals(payload,IdCardDetails.decodeBars(strip)); }
+        finally { strip.recycle(); }
+    }
+
+    @Test public void closeupUpdatesOnlyTheSelectedHistoryEntryAndKeepsUsageAndRawPayload() throws Exception {
+        try (ReadingHistory store = new ReadingHistory(RuntimeEnvironment.getApplication())) {
+            AzureReader.Reading back = new AzureReader.Reading(catalog.cards.get("id_back"),"役別\n0000000105",null);
+            back.usage = new ScanUsage().snapshot();
+            String old = store.add(back), target = store.add(back);
+            try (ActivityController<MainActivity> ctl = Robolectric.buildActivity(MainActivity.class).setup()) {
+                MainActivity activity = ctl.get();
+                View root = activity.findViewById(android.R.id.content);
+                View label = find(root, "身分證反面");
+                ((View) label.getParent().getParent()).performClick();
+                find(root,"補掃左下角條碼").performClick();
+                org.robolectric.shadows.ShadowActivity.IntentForResult req =
+                        Shadows.shadowOf(activity).getNextStartedActivityForResult();
+                assertTrue(req.intent.getBooleanExtra(LiveScanActivity.BARCODE_ONLY,false));
+                activity.onActivityResult(req.requestCode,Activity.RESULT_CANCELED,null);
+                assertNull(store.get(target).local.opt("Barcode"));
+                find(root,"補掃左下角條碼").performClick();
+                activity.onActivityResult(req.requestCode,Activity.RESULT_OK,
+                        new Intent().putExtra(LiveScanActivity.BARCODE_VALUE,"R012340000"));
+                assertNull(find(root,"補掃左下角條碼"));
+                JSONObject fields = new JSONObject(((TextView)root.findViewWithTag("transcript-json"))
+                        .getText().toString()).getJSONObject("欄位");
+                assertEquals("R012340000",fields.getString("身分證字號"));
+                assertEquals("R012340000",fields.getString(IdCardDetails.BARCODE_LABEL));
+                assertEquals("0000000105",fields.getString("證件流水號"));
+                assertEquals(back.usage.toString(),store.get(target).usage.toString());
+                store.completeBarcode(target,"S112340000");
+                assertEquals("R012340000",store.get(target).local.getString("Barcode"));
+                assertFalse(store.get(old).local.has("Barcode"));
+                assertEquals(2,store.list().size());
+            }
+        }
+    }
+
+    @Test public void usageCardShowsSeparateCostTimeAndTokenValuesAndPartialPricing() throws Exception {
+        JSONObject op = obj("stage","Decisions 分類","input",1071,"output",1,"usd","0.000044982");
+        JSONObject usage = obj("tokens",1072,"elapsedMs",5420,"usd","0.001044982","partialCost",true,
+                "operations",new JSONArray().put(op),"rateBasis","參考單價");
+        View card = new UsagePanel(new ReaderScreen(RuntimeEnvironment.getApplication())).show(usage);
+        for (String label : new String[]{"已知費用小計","US$0.001044982","Token 用量","1,072","處理時間",
+                "5.42 秒","影像分類","US$0.000044982","參考單價"}) assertNotNull(label,find(card,label));
     }
 
     @Test public void bothDecisionContractsIncludeEveryType() throws Exception {
@@ -368,6 +448,9 @@ public class CardReaderTest {
                 JSONObject fields = new JSONObject(((TextView)page.findViewWithTag("transcript-json")).getText().toString()).getJSONObject("欄位");
                 assertEquals("", fields.getString("役別"));
                 assertEquals("0000000105", fields.getString("證件流水號"));
+                assertTrue(fields.has(IdCardDetails.BARCODE_LABEL));
+                if (barcode.isEmpty()) assertTrue(fields.isNull(IdCardDetails.BARCODE_LABEL));
+                else assertEquals(barcode, fields.getString(IdCardDetails.BARCODE_LABEL));
                 if (barcode.startsWith("B")) assertEquals(barcode, fields.getString("身分證字號"));
                 else { assertTrue(fields.has("身分證字號")); assertTrue(fields.isNull("身分證字號")); }
             }
@@ -385,7 +468,7 @@ public class CardReaderTest {
         int w = 320, h = 200;
         float density = context.getResources().getDisplayMetrics().density;
         int[] gray = new int[w * h];
-        for (int margin : new int[]{28, 8}) {
+        for (int margin : new int[]{34, 8}) {
             Arrays.fill(gray, 25);
             for (int y = margin; y < h - margin; y++) Arrays.fill(gray, y*w + margin, (y+1)*w - margin, 220);
             DocumentFrame frame = DocumentFrame.detect(gray, w, h, null);
@@ -395,7 +478,7 @@ public class CardReaderTest {
             android.graphics.Bitmap image = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
             image.eraseColor(android.graphics.Color.WHITE);
             overlay.draw(new android.graphics.Canvas(image));
-            int color = margin == 28 ? LiveScanActivity.Outline.YELLOW : LiveScanActivity.Outline.GREEN;
+            int color = margin == 34 ? LiveScanActivity.Outline.YELLOW : LiveScanActivity.Outline.GREEN;
             int colored = 0, dark = 0;
             for (int y = 2; y < h / 2; y++) {
                 int pixel = image.getPixel(w / 2, y);
@@ -508,9 +591,9 @@ public class CardReaderTest {
     }
 
     @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
-    public void liveHintIsProminentAndSeventyPercentIsTheCaptureBoundary() {
-        assertFalse(LiveScanActivity.coversEnough(.699f));
-        assertTrue(LiveScanActivity.coversEnough(.70f));
+    public void liveHintIsProminentAndSixtyPercentIsTheCaptureBoundary() {
+        assertFalse(LiveScanActivity.coversEnough(.599f));
+        assertTrue(LiveScanActivity.coversEnough(.60f));
         assertTrue(LiveScanActivity.coversEnough(.75f));
         try (ActivityController<LiveScanActivity> ctl = Robolectric.buildActivity(LiveScanActivity.class).create()) {
             View root = ctl.get().findViewById(android.R.id.content);
@@ -519,7 +602,7 @@ public class CardReaderTest {
             assertTrue(hint.getTextSize() >= 26 * ctl.get().getResources().getDisplayMetrics().scaledDensity);
             assertTrue(hint.getTypeface().isBold());
             assertNotNull(hint.getBackground());
-            assertNotNull(find(root, "占取景框 70% 以上、文字清晰且穩定時，自動裁切並送往 Azure 辨識。"));
+            assertNotNull(find(root, "占取景框 60% 以上、文字清晰且穩定時，自動裁切並送往 Azure 辨識。"));
         }
     }
 

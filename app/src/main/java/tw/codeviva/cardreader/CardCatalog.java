@@ -53,9 +53,11 @@ final class CardCatalog {
                 definitions.put(field.getString("key"), obj("type", "string", "method", "extract",
                     "description", description));
             }
+            JSONObject config = obj("enableOcr", true, "returnDetails", true, "estimateFieldSourceAndConfidence", true);
+            if (code.equals("id_back")) config.put("enableBarcode", true);
             return obj("baseAnalyzerId", "prebuilt-document", "description", label,
                 "models", obj("completion", model, "embedding", "text-embedding-3-large"),
-                "config", obj("enableOcr", true, "returnDetails", true, "estimateFieldSourceAndConfidence", true),
+                "config", config,
                 "fieldSchema", obj("name", "DocumentFields", "fields", definitions));
         }
 

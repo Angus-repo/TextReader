@@ -29,7 +29,9 @@ final class ResultLayout {
         this.page = page;
     }
 
-    void show(AzureReader.Reading reading) {
+    void show(AzureReader.Reading reading) { show(reading, null); }
+
+    void show(AzureReader.Reading reading, Runnable rescanBarcode) {
         TextView title = ui.text(reading.type.label, 26, INK, true);
         title.setAccessibilityHeading(true);
         page.addView(title);
@@ -48,10 +50,16 @@ final class ResultLayout {
         boolean usedImage = false;
         List<Row> local = null;
         int cloudValues = 0;
+        int definedFields = reading.type.fields.length();
         for (int i = 0; i < reading.type.fields.length(); i++) {
             JSONObject definition = reading.type.fields.optJSONObject(i);
             String label = definition.optString("label");
             String key = definition.optString("key");
+            if (back && (IdCardDetails.ID_LABEL.equals(label) || IdCardDetails.BARCODE_LABEL.equals(label))) {
+                // These reserved rows use only a decoded payload, including on older custom rules.
+                definedFields--;
+                continue;
+            }
             JSONObject field = reading.fields == null ? null : reading.fields.optJSONObject(key);
             String value = IdCardDetails.cloudValue(reading, key);
             if (front && "Sex".equals(key)) value = IdCardDetails.sexValue(value);
@@ -79,7 +87,7 @@ final class ResultLayout {
             if (front) rows.removeIf(row -> "性別".equals(row.label) || row.label.equals(sexLabel)
                     || "統一編號".equals(row.label) || "身分證字號".equals(row.label) || row.label.equals(idLabel));
             if (back) rows.removeIf(row -> "役別".equals(row.label) || row.label.equals(serviceLabel)
-                    || row.label.equals(serialLabel) || IdCardDetails.ID_LABEL.equals(row.label));
+                    || row.label.equals(serialLabel) || IdCardDetails.ID_LABEL.equals(row.label) || IdCardDetails.BARCODE_LABEL.equals(row.label));
             for (Row row : rows) missing.remove(row.label);
         }
 
@@ -127,13 +135,13 @@ final class ResultLayout {
         }
         if (back) {
             String barcode = reading.local.optString("Barcode");
+            rows.add(new Row(IdCardDetails.BARCODE_LABEL, barcode.isEmpty() ? null : barcode, Double.NaN));
             if (!barcode.isEmpty()) {
-                rows.add(new Row(IdCardDetails.BARCODE_LABEL, barcode, Double.NaN));
                 usedImage = true;
             } else if (reading.local.has("Barcode")) {
-                deviceNote = "左下角條碼未能解碼，請讓黑白條紋完整入鏡並對焦後重掃。";
+                deviceNote = "左下角條碼未能解碼，請近拍同一張證件，讓完整條紋與兩側留白一起入框。";
             } else {
-                deviceNote = "這筆紀錄沒有條碼資料，可重新掃描身分證背面。";
+                deviceNote = "這筆紀錄沒有條碼資料，可補掃同一張證件的左下角。";
             }
         }
 
@@ -147,7 +155,7 @@ final class ResultLayout {
         int filled = 0;
         for (Row row : rows) if (row.value != null && !row.value.isEmpty()) filled++;
         if (cloudValues > 0 || nhi) {
-            header.addView(ui.text("已讀取 " + filled + " / " + (reading.type.fields.length() + (back ? 2 : 0)), 13, MUTED, false));
+            header.addView(ui.text("已讀取 " + filled + " / " + (definedFields + (back ? 2 : 0)), 13, MUTED, false));
         }
         ui.gap(card, 8);
         if (rows.isEmpty()) {
@@ -156,7 +164,7 @@ final class ResultLayout {
             card.addView(ui.text(message, 14, MUTED, false));
         } else if (filled > cloudValues) {
             String source = cloudValues == 0 ? "依原文整理" : "部分欄位依原文整理";
-            card.addView(ui.text(usedImage ? "含手機從影像讀取的欄位" : source, 13, MUTED, false));
+            card.addView(ui.text(usedImage ? "含從影像讀取的欄位" : source, 13, MUTED, false));
             ui.gap(card, 6);
         }
         for (Row row : rows) {
@@ -174,6 +182,10 @@ final class ResultLayout {
             ui.line(card);
             ui.gap(card, 8);
             card.addView(ui.text(deviceNote, 14, MUTED, false));
+            if (rescanBarcode != null) {
+                ui.gap(card, 8);
+                card.addView(ui.action("補掃左下角條碼", false, rescanBarcode));
+            }
         }
         ui.gap(page, 12);
         addTranscript(reading.type.label, displayText, rows);

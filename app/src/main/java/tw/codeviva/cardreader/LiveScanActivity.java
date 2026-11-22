@@ -20,9 +20,13 @@ import java.util.concurrent.Executors;
 
 @SuppressWarnings("deprecation")
 public final class LiveScanActivity extends Activity implements TextureView.SurfaceTextureListener {
-    static final int COVERAGE_PERCENT = 70;
+    static final int COVERAGE_PERCENT = 60;
     static final float MIN_COVERAGE = COVERAGE_PERCENT / 100f;
     static boolean coversEnough(float coverage) { return coverage >= MIN_COVERAGE; }
+    static final String BARCODE_ONLY = "barcode_only", BARCODE_VALUE = "barcode_value";
+    static final String BARCODE_GUIDE = "對準同一張身分證背面的左下角條碼";
+    private boolean barcodeOnly;
+    private String previousBarcode = "";
     static final String REVIEW_CROP = "review_crop";
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -44,6 +48,7 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
 
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
+        barcodeOnly = getIntent().getBooleanExtra(BARCODE_ONLY, false);
         vertical = saved != null && saved.getBoolean("vertical");
         ui = new ReaderScreen(this);
         LinearLayout root = ui.col();
@@ -57,7 +62,7 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
         ui.pad(bar, 12, 6);
         bar.addView(ui.action("‹ 返回", false, this::finish));
         ui.gap(bar, 12);
-        ui.weight(bar, ui.text("即時辨識", 19, ReaderScreen.INK, true));
+        ui.weight(bar, ui.text(barcodeOnly ? "補掃條碼" : "即時辨識", 19, ReaderScreen.INK, true));
         shape = ui.action("", false, () -> {
             vertical = !vertical;
             shapeLabel();
@@ -66,7 +71,7 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
             startCamera();
         });
         shapeLabel();
-        bar.addView(shape);
+        if (!barcodeOnly) bar.addView(shape);
         root.addView(bar);
         stage = new FrameLayout(this);
         stage.setBackgroundColor(0xff172c29);
@@ -85,7 +90,7 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
         LinearLayout footer = ui.col();
         ui.pad(footer, 14, 10);
         root.addView(footer);
-        hint = ui.text("請將文件四角放入取景框", 26, 0xff302511, true);
+        hint = ui.text(barcodeOnly ? BARCODE_GUIDE : "請將文件四角放入取景框", 26, 0xff302511, true);
         hint.setTypeface(Typeface.DEFAULT_BOLD);
         hint.setGravity(Gravity.CENTER);
         hint.setBackground(ui.bg(0xffffdf91, 14, false));
@@ -94,11 +99,11 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
         hint.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         footer.addView(hint);
         ui.gap(footer, 6);
-        footer.addView(ui.text("占取景框 " + COVERAGE_PERCENT + "% 以上、文字清晰且穩定時，自動裁切並送往 Azure 辨識。", 16, ReaderScreen.MUTED, false));
+        footer.addView(ui.text(barcodeOnly ? "將條紋水平置中，左右留白。手機解碼成功後會更新這筆紀錄。" : "占取景框 " + COVERAGE_PERCENT + "% 以上、文字清晰且穩定時，自動裁切並送往 Azure 辨識。", 16, ReaderScreen.MUTED, false));
         reviewCrop = new CheckBox(this);
         reviewCrop.setText("送出前先預覽裁切影像");
         reviewCrop.setChecked(saved != null && saved.getBoolean(REVIEW_CROP));
-        footer.addView(reviewCrop);
+        if (!barcodeOnly) footer.addView(reviewCrop);
         permissionSettings = ui.action("開啟相機權限設定", false, () -> startActivity(new android.content.Intent(
                 android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                 android.net.Uri.parse("package:" + getPackageName()))));
@@ -119,7 +124,7 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
         state.putBoolean(REVIEW_CROP, reviewCrop.isChecked());
     }
 
-    private float aspect() { return vertical ? .7071f : 1.586f; }
+    private float aspect() { return barcodeOnly ? 3.5f : vertical ? .7071f : 1.586f; }
 
     private void layoutWindow() {
         int w = Math.round(Math.min(stage.getWidth(), stage.getHeight() * aspect()));
@@ -190,7 +195,7 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
             camera.startPreview();
             lastFocus = 0;
             focusIfNeeded();
-            message("請將文件放在取景框中央，露出四角");
+            message(barcodeOnly ? BARCODE_GUIDE : "請將文件放在取景框中央，露出四角");
             next(generation, 180);
         } catch (RuntimeException | IOException e) {
             stopCamera();
@@ -222,6 +227,7 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
         generation++;
         main.removeCallbacksAndMessages(null);
         previous = null;
+        previousBarcode = "";
         if (outline != null) outline.show(null);
         if (camera != null) {
             Camera old = camera;
@@ -268,6 +274,10 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
         Bitmap image = null, cropped = null;
         try {
             image = viewfinder(data, w, h, turn, ratio);
+            if (barcodeOnly) {
+                reportBarcode(token, IdCardDetails.decodeBars(image));
+                return;
+            }
             if (reader == null) reader = new DeviceText(this);
             Text scene = reader.read(image);
             Rect words = DeviceText.documentTextBounds(scene, image);
@@ -318,10 +328,27 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
         }
     }
 
+    private void reportBarcode(int token, String value) {
+        main.post(() -> {
+            if (token != generation || !resumed || finished) return;
+            if (!value.isEmpty() && value.equals(previousBarcode)) {
+                finished = true;
+                setResult(RESULT_OK, new android.content.Intent().putExtra(BARCODE_VALUE, value));
+                finish();
+                return;
+            }
+            previousBarcode = value;
+            message(value.isEmpty() ? "請拿穩手機，讓完整條紋與兩側留白入框" : "已讀到條碼，請保持穩定");
+            focusIfNeeded();
+            next(token, 180);
+        });
+    }
+
     private void report(int token, DocumentFrame doc, String status, boolean ready, byte[] jpeg) {
         main.post(() -> {
             if (token != generation || !resumed || finished) return;
             outline.show(doc);
+            if (barcodeOnly) previousBarcode = "";
             if (ready && doc.closeTo(previous)) {
                 try (OutputStream out = getContentResolver().openOutputStream(getIntent().getData(), "wt")) {
                     if (out == null) throw new IOException();

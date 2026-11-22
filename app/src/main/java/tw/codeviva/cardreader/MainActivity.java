@@ -15,7 +15,8 @@ import java.util.concurrent.*;
 import static tw.codeviva.cardreader.ReaderScreen.*;
 
 public class MainActivity extends Activity {
-    private static final int CAMERA=31,GALLERY=32,EXPORT=33,IMPORT=34;
+    private static final int CAMERA=31,GALLERY=32,EXPORT=33,IMPORT=34,BARCODE=35;
+    private String barcodeRecord;
     private ReaderScreen ui;
     private LinearLayout content;
     private ScrollView scroll;
@@ -43,6 +44,7 @@ public class MainActivity extends Activity {
         history = new ReadingHistory(this);
         try {catalog=new CardCatalog(this);}catch(Exception e){throw new IllegalStateException(e);}
         try {config=Config.load(this);}catch(Exception e){config=new Config();error="無法解密連線設定，請重新設定 Azure 連線。";}
+        if (saved != null) barcodeRecord = saved.getString("barcodeRecord");
         if(saved!=null && saved.getString("capture")!=null) capture=Uri.parse(saved.getString("capture"));
         File[] leftovers=CaptureProvider.dir(this).listFiles();
         if(leftovers!=null) for(File f:leftovers) if(capture==null || !f.equals(CaptureProvider.file(this,capture))) f.delete();
@@ -205,6 +207,20 @@ public class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
+        if (request == BARCODE) {
+            String id = barcodeRecord;
+            barcodeRecord = null;
+            if (id == null) return;
+            try {
+                if (result == RESULT_OK && data != null) history.completeBarcode(id,
+                        data.getStringExtra(LiveScanActivity.BARCODE_VALUE));
+                openReading(id);
+            } catch (JSONException | android.database.SQLException e) {
+                error = "無法更新這筆紀錄的條碼。";
+                home();
+            }
+            return;
+        }
         if (request == EXPORT || request == IMPORT) {
             if (result == RESULT_OK && data != null && data.getData() != null)
                 transferBackup(request == EXPORT, data.getData());
@@ -229,6 +245,7 @@ public class MainActivity extends Activity {
     }
     @Override protected void onSaveInstanceState(Bundle state){
         super.onSaveInstanceState(state);
+        state.putString("barcodeRecord", barcodeRecord);
         if(capture!=null)state.putString("capture",capture.toString());
     }
     private interface Job<T>{T go()throws Exception;}
@@ -368,37 +385,36 @@ public class MainActivity extends Activity {
             }
             reading.usage = api.usage.snapshot();
             try {
-                history.add(reading);
+                return history.add(reading);
             } catch (android.database.SQLException e) {
                 throw new IOException("無法儲存辨識紀錄，請確認手機可用空間。", e);
             }
-            return reading;
-        }, reading -> {
+        }, id -> {
             photo = null;
             selected = null;
             classified = null;
-            detail(reading);
+            openReading(id);
         });
     }
 
     private void openReading(String id) {
         try {
-            detail(history.get(id));
+            detail(history.get(id), id);
         } catch (JSONException | android.database.SQLException e) {
             error = "無法開啟這筆辨識紀錄。";
             home();
         }
     }
 
-    private void detail(AzureReader.Reading reading) {
+    private void detail(AzureReader.Reading reading, String id) {
         shell("detail", "讀取結果", this::home);
-        new ResultLayout(ui, content).show(reading);
+        new ResultLayout(ui, content).show(reading, () -> {
+            barcodeRecord = id;
+            startActivityForResult(new Intent(this, LiveScanActivity.class)
+                    .putExtra(LiveScanActivity.BARCODE_ONLY, true), BARCODE);
+        });
         ui.gap(content, 12);
-        LinearLayout usagePanel = ui.panel();
-        content.addView(usagePanel);
-        usagePanel.addView(ui.text("本次辨識用量", 17, GREEN, true));
-        ui.gap(usagePanel, 6);
-        note(usagePanel, reading.usage == null ? ScanUsage.LEGACY : ScanUsage.breakdown(reading.usage));
+        content.addView(new UsagePanel(ui).show(reading.usage));
         ui.gap(content, 16);
         content.addView(ui.action("繼續掃描", true, this::home));
     }
