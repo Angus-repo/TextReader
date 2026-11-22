@@ -58,6 +58,18 @@ final class DeviceText implements AutoCloseable {
         }
     }
 
+    static String transcribe(Context context, byte[] jpeg) throws IOException, InterruptedException {
+        Bitmap bitmap = android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length);
+        if (bitmap == null) throw new IOException("無法讀取照片，請重新選取。");
+        try (DeviceText device = new DeviceText(context)) {
+            String text = device.read(bitmap).getText().trim();
+            if (text.isEmpty()) throw new IOException("Minimal 未讀到文字。請重拍清晰照片，或在辨識規則中改選 Basic 或 Standard。");
+            return text;
+        } finally {
+            bitmap.recycle();
+        }
+    }
+
     static Rect documentTextBounds(Text text, Bitmap image) {
         Rect words = new Rect();
         for (Text.TextBlock block : text.getTextBlocks()) {

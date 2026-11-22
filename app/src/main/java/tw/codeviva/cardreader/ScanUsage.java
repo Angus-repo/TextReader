@@ -66,22 +66,35 @@ final class ScanUsage {
     }
 
     static void document(JSONObject op, JSONObject u, boolean structured, String analyzer, Config cfg) throws JSONException {
-        long basic = count(u, "documentPagesBasic"), layout = count(u, "documentPagesStandard"), minimal = count(u, "documentPagesMinimal");
-        boolean pageReport = basic >= 0 || layout >= 0 || minimal >= 0;
-        boolean priced = pageReport, knownCharge = pageReport;
-        if (!pageReport && !structured) {
-            // The app sends exactly one JPEG. The prebuilt Read/Layout meter is known for this input.
-            if ("prebuilt-read".equals(analyzer)) basic = 1;
-            else if ("prebuilt-layout".equals(analyzer)) layout = 1;
-            knownCharge = basic >= 0 || layout >= 0;
-            priced = knownCharge;
-            if (knownCharge) op.put("inferredPages", true);
+        JSONArray pageCharges = new JSONArray();
+        BigDecimal cost = BigDecimal.ZERO;
+        long pages = 0;
+        boolean reported = false;
+        for (ExtractionMode mode : ExtractionMode.values()) {
+            for (boolean inline : new boolean[]{false, true}) {
+                long units = count(u, mode.meter() + (inline ? "Inline" : ""));
+                if (units < 0) continue;
+                reported = true;
+                pages += units;
+                if (units > 0) cost = cost.add(pageCharge(pageCharges, mode, units, inline, cfg));
+            }
         }
-        long pages = Math.max(0,basic) + Math.max(0,layout) + Math.max(0,minimal);
-        if (knownCharge) op.put("pages", pages);
-        BigDecimal cost = charge(Math.max(0,basic), BigDecimal.ONE, 3)
-                .add(charge(Math.max(0,layout), new BigDecimal("5"), 3))
-                .add(charge(Math.max(0,minimal), new BigDecimal("0.01"), 3));
+        boolean knownCharge = reported;
+        if (!reported) {
+            // A JPEG sent to Read/Layout is exactly one input page. TXT uses 3,000 characters per page.
+            for (ExtractionMode mode : ExtractionMode.values()) {
+                if (!mode.analyzer.equals(analyzer)) continue;
+                pages = mode == ExtractionMode.MINIMAL ? op.optLong("textPageEstimate", 0) : 1;
+                if (pages > 0) {
+                    cost = pageCharge(pageCharges, mode, pages, false, cfg);
+                    knownCharge = true;
+                    op.put("inferredPages", true);
+                }
+            }
+        }
+        if (knownCharge) op.put("pages", pages).put("pageCharges", pageCharges)
+                .put("pageUsd", cost.stripTrailingZeros().toPlainString());
+        boolean priced = knownCharge;
         long context = count(u, "contextualizationTokens");
         long advanced = count(u, "advancedContextualizationTokens");
         long tokens = Math.max(0,context) + Math.max(0,advanced);
@@ -117,6 +130,16 @@ final class ScanUsage {
         op.put("priced", priced && completeTokens);
     }
 
+    private static BigDecimal pageCharge(JSONArray charges, ExtractionMode mode, long pages, boolean inline,
+                                         Config cfg) throws JSONException {
+        BigDecimal rate = inline ? mode.referenceRate.multiply(new BigDecimal("1.5"))
+                : mode.asyncRate(cfg);
+        BigDecimal amount = charge(pages, rate, 3);
+        charges.put(obj("mode", mode.label, "inline", inline, "pages", pages,
+                "perThousandUsd", rate.stripTrailingZeros().toPlainString(), "usd", amount.stripTrailingZeros().toPlainString()));
+        return amount;
+    }
+
     private static long count(JSONObject u, String key) {
         return u == null || u.isNull(key) ? -1 : u.optLong(key, -1);
     }
@@ -142,6 +165,7 @@ final class ScanUsage {
         long total = 0, apiMillis = 0;
         boolean anyTokens = false, incompleteTokens = false, anyCost = false, incompleteCost = false;
         BigDecimal usd = BigDecimal.ZERO;
+        boolean inferredPages = false;
         for (int i=0; i<operations.length(); i++) {
             JSONObject op = operations.getJSONObject(i);
             apiMillis += op.optLong("apiElapsedMs");
@@ -149,9 +173,11 @@ final class ScanUsage {
             incompleteTokens |= !op.has("tokens") || op.optBoolean("partialTokens");
             if (op.has("usd")) { usd = usd.add(new BigDecimal(op.getString("usd"))); anyCost = true; }
             incompleteCost |= !op.optBoolean("priced");
+            inferredPages |= op.optBoolean("inferredPages");
         }
         JSONObject result = obj("apiElapsedMs", apiMillis, "partialTokens", incompleteTokens, "partialCost", incompleteCost,
-                "rateBasis", "Global Standard 參考價（2026-11-22），自訂單價優先", "operations", new JSONArray(operations.toString()));
+                "rateBasis", "依用量與美元單價換算（參考價 2026-11-22，可自訂）。實際扣款以 Azure 帳單為準。", "operations", new JSONArray(operations.toString()));
+        if (inferredPages) result.put("inferredPages", true);
         if (anyTokens) result.put("tokens", total);
         if (anyCost) result.put("usd", usd.stripTrailingZeros().toPlainString());
         return result;
@@ -165,7 +191,7 @@ final class ScanUsage {
         String time = (usage.has("apiElapsedMs") ? "API " : "舊版處理 ") + timeText(usage);
         String price = usage.has("usd") ? (usage.optBoolean("partialCost") ? "已知小計 " : "估計 ")
                 + "US$" + usage.optString("usd") : "費用未取得";
-        return tokens + " · " + time + " · " + price;
+        return tokens + " · " + time + " · " + price + (usage.optBoolean("inferredPages") ? "（含推估頁數）" : "");
     }
 
     static String timeText(JSONObject usage) {

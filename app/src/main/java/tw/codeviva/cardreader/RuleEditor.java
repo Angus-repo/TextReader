@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.text.InputType;
 import android.view.View;
+import android.widget.ArrayAdapter;
+import android.widget.Spinner;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -27,13 +29,14 @@ final class RuleEditor {
     private final EditText name;
     private final EditText criteria;
     private final CheckBox automatic;
+    private final Spinner extraction;
     private final LinearLayout fieldList;
     private final ArrayList<FieldRow> rows = new ArrayList<>();
     private final TextView error;
     private final String initial;
 
     RuleEditor(Activity activity, ReaderScreen ui, LinearLayout body, CardCatalog catalog,
-               String existingCode, Runnable close) {
+               String existingCode, Config config, Runnable close) {
         this.activity = activity;
         this.ui = ui;
         this.catalog = catalog;
@@ -57,6 +60,29 @@ final class RuleEditor {
         ui.gap(section, 12);
         criteria = input(section, "分類描述", card == null ? "" : card.criteria,
             "描述足以辨認此類型的標題、版面、標誌，或與反面的差別。", true);
+        ui.gap(section, 12);
+        TextView extractionLabel = ui.text("內容擷取強度", 14, MUTED, true);
+        section.addView(extractionLabel);
+        extraction = new Spinner(activity);
+        extraction.setId(View.generateViewId());
+        extractionLabel.setLabelFor(extraction.getId());
+        extraction.setContentDescription("內容擷取強度");
+        extraction.setAdapter(new ArrayAdapter<>(activity, android.R.layout.simple_spinner_dropdown_item, ExtractionMode.values()));
+        extraction.setSelection((card == null ? ExtractionMode.BASIC : card.extraction).ordinal());
+        section.addView(extraction, -1, ui.dp(48));
+        TextView unitPrice = ui.text("", 14, GREEN, false);
+        section.addView(unitPrice);
+        extraction.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            public void onNothingSelected(android.widget.AdapterView<?> parent) {}
+            public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
+                java.math.BigDecimal rate = ExtractionMode.values()[position].asyncRate(config);
+                unitPrice.setText("非同步擷取 US$" + rate.stripTrailingZeros().toPlainString()
+                        + "／1,000 頁，每頁 US$" + rate.movePointLeft(3).stripTrailingZeros().toPlainString());
+            }
+        });
+        section.addView(ui.text("Minimal 先由手機辨識，再將純文字送往 Azure，不含原圖版面。分類與自訂欄位另計費。", 13, MUTED, false));
+        if (card != null && !card.explicitExtraction)
+            section.addView(ui.text("儲存後，全文與自訂欄位都會套用所選強度。", 13, MUTED, false));
         ui.gap(body, 18);
         body.addView(ui.text("擷取欄位", 19, INK, true));
         ui.gap(body, 6);
@@ -112,6 +138,7 @@ final class RuleEditor {
 
     private void applyTemplate(CardCatalog.Card template) {
         criteria.setText(template.criteria);
+        extraction.setSelection(template.extraction.ordinal());
         fieldList.removeAllViews();
         rows.clear();
         for (int i = 0; i < template.fields.length(); i++) {
@@ -189,7 +216,7 @@ final class RuleEditor {
     private String draft() {
         try {
             return CardCatalog.obj("name", name.getText().toString(), "criteria", criteria.getText().toString(),
-                "automatic", automatic.isChecked(), "fields", fields()).toString();
+                "automatic", automatic.isChecked(), "extractionMode", ((ExtractionMode) extraction.getSelectedItem()).label, "fields", fields()).toString();
         } catch (JSONException e) {
             throw new IllegalStateException(e);
         }
@@ -208,7 +235,7 @@ final class RuleEditor {
     private void save() {
         try {
             catalog.save(code, name.getText().toString(), criteria.getText().toString(),
-                fields(), automatic.isChecked());
+                fields(), automatic.isChecked(), (ExtractionMode) extraction.getSelectedItem());
             Toast.makeText(activity, "辨識規則已儲存", Toast.LENGTH_SHORT).show();
             close.run();
         } catch (Exception e) {

@@ -59,7 +59,7 @@ final class ReadingHistory extends SQLiteOpenHelper {
         long now = System.currentTimeMillis();
         CardCatalog.Card type = reading.type;
         JSONObject record = obj("id", id, "createdAt", now, "type", obj("code", type.code, "label", type.label,
-            "criteria", type.criteria, "fields", type.fields), "text", reading.text);
+            "criteria", type.criteria, "fields", type.fields, "extractionMode", type.explicitExtraction ? type.extraction.label : null), "text", reading.text);
         if (reading.usage != null) record.put("usage", reading.usage);
         if (reading.fields != null) record.put("fields", reading.fields);
         if (reading.local.length() > 0) record.put("local", reading.local);

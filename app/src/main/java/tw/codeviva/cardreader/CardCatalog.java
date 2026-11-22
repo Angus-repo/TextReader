@@ -19,10 +19,14 @@ final class CardCatalog {
         final String code, label, criteria;
         final JSONArray fields;
         final boolean autoFields;
+        final ExtractionMode extraction;
+        final boolean explicitExtraction;
 
         Card(JSONObject json) throws JSONException {
             code = json.getString("code");
             label = json.getString("label");
+            explicitExtraction = json.has("extractionMode");
+            extraction = ExtractionMode.forRule(json.optString("extractionMode"), code);
             criteria = json.getString("criteria");
             fields = json.getJSONArray("fields");
             autoFields = json.optBoolean("autoFields") && hasFields();
@@ -41,7 +45,7 @@ final class CardCatalog {
         }
 
         String textAnalyzer() {
-            return code.equals("receipt") || code.equals("form") ? "prebuilt-layout" : "prebuilt-read";
+            return extraction.analyzer;
         }
 
         JSONObject schema(String model) throws JSONException {
@@ -53,8 +57,9 @@ final class CardCatalog {
                 definitions.put(field.getString("key"), obj("type", "string", "method", "extract",
                     "description", description));
             }
-            JSONObject config = obj("enableOcr", true, "returnDetails", true, "estimateFieldSourceAndConfidence", true);
-            if (code.equals("id_back")) config.put("enableBarcode", true);
+            JSONObject config = obj("enableOcr", extraction != ExtractionMode.MINIMAL, "returnDetails", true, "estimateFieldSourceAndConfidence", true);
+            if (explicitExtraction) config.put("enableLayout", extraction == ExtractionMode.STANDARD);
+            if (code.equals("id_back") && extraction != ExtractionMode.MINIMAL) config.put("enableBarcode", true);
             return obj("baseAnalyzerId", "prebuilt-document", "description", label,
                 "models", obj("completion", model, "embedding", "text-embedding-3-large"),
                 "config", config,
@@ -140,6 +145,11 @@ final class CardCatalog {
     }
 
     void save(String code, String label, String criteria, JSONArray fields, boolean autoFields) throws Exception {
+        Card previous = cards.get(code);
+        save(code, label, criteria, fields, autoFields, previous != null && previous.explicitExtraction ? previous.extraction : null);
+    }
+
+    void save(String code, String label, String criteria, JSONArray fields, boolean autoFields, ExtractionMode extraction) throws Exception {
         label = label.trim();
         criteria = criteria.trim();
         if (label.isEmpty() || criteria.isEmpty())
@@ -161,7 +171,7 @@ final class CardCatalog {
             field.put("description", description);
         }
         JSONObject json = obj("code", code, "label", label, "criteria", criteria,
-            "fields", fields, "autoFields", autoFields && fields.length() > 0);
+            "fields", fields, "autoFields", autoFields && fields.length() > 0, "extractionMode", extraction == null ? null : extraction.label);
         if (!preferences.edit().putString(code, json.toString()).commit()) throw new IOException("無法儲存辨識規則。");
         reload();
     }

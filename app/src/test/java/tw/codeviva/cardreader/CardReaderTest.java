@@ -49,6 +49,87 @@ public class CardReaderTest {
         assertEquals(0, new java.math.BigDecimal("0.00005").compareTo(new java.math.BigDecimal(another.getString("usd"))));
     }
 
+    @Test public void savedRuleRoutesAllThreeFullTextModesAndCustomSchemas() throws Exception {
+        CardCatalog.Card original = catalog.cards.get("id_back");
+        Set<String> analyzerIds = new HashSet<>();
+        for (ExtractionMode mode : ExtractionMode.values()) {
+            catalog.save(original.code, original.label, original.criteria, original.fields, true, mode);
+            CardCatalog.Card saved = new CardCatalog(RuntimeEnvironment.getApplication()).cards.get(original.code);
+            assertEquals(mode, saved.extraction);
+            boolean minimal = mode == ExtractionMode.MINIMAL;
+            JSONObject schema = saved.schema(config.cuModel).getJSONObject("config");
+            assertEquals(!minimal, schema.getBoolean("enableOcr"));
+            assertEquals(mode == ExtractionMode.STANDARD, schema.getBoolean("enableLayout"));
+            assertEquals(!minimal, schema.optBoolean("enableBarcode"));
+            assertTrue(analyzerIds.add(saved.analyzerId(config.cuModel)));
+            final byte[] payload = minimal ? "測試文字".getBytes(java.nio.charset.StandardCharsets.UTF_8) : new byte[]{1, 2};
+            for (boolean structured : new boolean[]{false, true}) {
+                AzureReader reader = new AzureReader(catalog, config, (method, url, header, key, request) -> {
+                    if (method.equals("GET")) return reply(200, null, obj("status", "ready"));
+                    assertTrue(url.contains("/" + (structured ? saved.analyzerId(config.cuModel) : mode.analyzer) + ":analyze"));
+                    JSONObject input = request.getJSONArray("inputs").getJSONObject(0);
+                    assertEquals(minimal ? "text/plain" : "image/jpeg", input.getString("mimeType"));
+                    assertArrayEquals(payload, android.util.Base64.decode(input.getString("data"), android.util.Base64.DEFAULT));
+                    return reply(200, null, obj("usage", obj(mode.meter(), 1),
+                            "result", obj("contents", new JSONArray().put(obj("markdown", "文字")))));
+                }, ms -> {});
+                reader.read(saved, payload, structured, msg -> {});
+                JSONObject op = reader.usage.snapshot().getJSONArray("operations").getJSONObject(0);
+                assertEquals(mode.label, op.getString("requestedMode"));
+                assertEquals(mode.referenceRate.movePointLeft(3).stripTrailingZeros().toPlainString(), op.getString("pageUsd"));
+            }
+        }
+        catalog.reset(original.code);
+        assertEquals(ExtractionMode.BASIC, catalog.cards.get(original.code).extraction);
+        assertFalse(catalog.cards.get(original.code).explicitExtraction);
+    }
+
+    @Test public void reportedMetersOverrideSelectionAndRatesStayWithTheReading() throws Exception {
+        ScanUsage usage = new ScanUsage();
+        JSONObject op = usage.begin(ScanUsage.CONTENT).put("requestedMode", "Standard");
+        config.pageRates.put("Basic", "0.80");
+        ScanUsage.document(op, obj("documentPagesMinimal", 1, "documentPagesBasic", 2,
+                "documentPagesStandard", 0, "documentPagesStandardInline", 1), false, "prebuilt-layout", config);
+        assertEquals("0.00911", op.getString("usd"));
+        assertEquals(4, op.getInt("pages"));
+        assertFalse(op.optBoolean("inferredPages"));
+        config.pageRates.put("Basic", "3");
+        JSONObject snapshot = usage.snapshot();
+        String display = visibleText(new UsagePanel(new ReaderScreen(RuntimeEnvironment.getApplication())).show(snapshot));
+        assertTrue(display.contains("規則選用 Standard"));
+        assertTrue(display.contains("Azure 回報 Basic 2 頁 · US$0.0016"));
+        assertTrue(display.contains("Azure 回報 Standard 同步 1 頁 · US$0.0075"));
+        assertTrue(display.contains("Azure 回報 Minimal 1 頁 · US$0.00001"));
+        ScanUsage missing = new ScanUsage();
+        JSONObject digital = missing.begin(ScanUsage.CONTENT).put("requestedMode", "Minimal").put("textPageEstimate", 2);
+        ScanUsage.document(digital, null, false, "prebuilt-digitalParse", config);
+        assertEquals("0.00002", digital.getString("usd"));
+        assertTrue(ScanUsage.summary(missing.snapshot()).contains("含推估頁數"));
+        JSONObject zero = new JSONObject();
+        ScanUsage.document(zero, obj("documentPagesMinimal", 0), false, "prebuilt-read", config);
+        assertEquals("0", zero.getString("usd"));
+        assertFalse(zero.optBoolean("inferredPages"));
+    }
+
+    @Test public void changeOnlyExtractionModeThroughRuleEditor() throws Exception {
+        try (ActivityController<MainActivity> controller = Robolectric.buildActivity(MainActivity.class).setup()) {
+            View root = controller.get().findViewById(android.R.id.content);
+            find(root, "辨識規則").performClick();
+            String label = catalog.cards.get("id_front").label;
+            ((View) find(root, label).getParent().getParent()).performClick();
+            View title = find(root, "內容擷取強度");
+            Spinner selector = root.findViewById(title.getLabelFor());
+            assertEquals(3, selector.getCount());
+            assertEquals(ExtractionMode.BASIC, selector.getSelectedItem());
+            selector.setSelection(ExtractionMode.MINIMAL.ordinal());
+            find(root, "儲存辨識規則").performClick();
+            assertEquals(ExtractionMode.MINIMAL, new CardCatalog(RuntimeEnvironment.getApplication()).cards.get("id_front").extraction);
+            ((View) find(root, label).getParent().getParent()).performClick();
+            selector = root.findViewById(find(root, "內容擷取強度").getLabelFor());
+            assertEquals(ExtractionMode.MINIMAL, selector.getSelectedItem());
+        }
+    }
+
     @Test public void missingMetersAndPricesKeepKnownSubtotalAndCompletedRetries() throws Exception {
         ScanUsage use = new ScanUsage();
         use.begin("前次未回報的分類");

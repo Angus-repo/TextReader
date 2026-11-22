@@ -15,6 +15,7 @@ import javax.crypto.spec.GCMParameterSpec;
 final class Config {
     static final String MS = "/providers/microsoft/v1/systemone", OA = "/openai/v1/decisions";
     boolean openAI;
+    JSONObject pageRates = new JSONObject();
     String decisionRate = "", completionInput = "", completionOutput = "", completionCached = "";
     String decisionRoot="", cuRoot="", model="Microsoft-Decision-1.1", cuModel="gpt-5.2", decisionKey="", cuKey="";
     static String endpoint(String raw, String suffix) {
@@ -30,7 +31,9 @@ final class Config {
         } catch (Exception e) { throw new IllegalArgumentException("請填 Azure 公有雲 HTTPS 資源端點，例如 https://資源名稱.services.ai.azure.com。"); }
     }
     void validate() {
-        for (String rate : new String[]{decisionRate, completionInput, completionOutput, completionCached}) {
+        java.util.List<String> rates = new java.util.ArrayList<>(java.util.Arrays.asList(decisionRate, completionInput, completionOutput, completionCached));
+        for (ExtractionMode mode : ExtractionMode.values()) rates.add(pageRates.optString(mode.label));
+        for (String rate : rates) {
             if (!rate.isEmpty() && !rate.matches("(?:0|[1-9][0-9]{0,5})(?:\\.[0-9]{1,9})?"))
                 throw new IllegalArgumentException("單價請輸入非負美元數字，例如 0.042；留空可使用參考價。");
         }
@@ -56,7 +59,7 @@ final class Config {
     void save(Context c) throws Exception {
         validate();
         byte[] plain=CardCatalog.obj("openAI",openAI,"decisionRoot",decisionRoot,"cuRoot",cuRoot,"model",model,
-            "decisionRate",decisionRate,"completionInput",completionInput,"completionOutput",completionOutput,"completionCached",completionCached,
+            "pageRates",pageRates,"decisionRate",decisionRate,"completionInput",completionInput,"completionOutput",completionOutput,"completionCached",completionCached,
             "cuModel",cuModel,"decisionKey",decisionKey,"cuKey",cuKey).toString().getBytes(StandardCharsets.UTF_8);
         Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");
         cipher.init(Cipher.ENCRYPT_MODE,key());
@@ -75,6 +78,7 @@ final class Config {
         cfg.openAI=j.getBoolean("openAI"); cfg.decisionRoot=j.getString("decisionRoot"); cfg.cuRoot=j.getString("cuRoot");
         cfg.model=j.getString("model"); cfg.cuModel=j.getString("cuModel");
         cfg.decisionKey=j.getString("decisionKey"); cfg.cuKey=j.getString("cuKey");
+        if (j.optJSONObject("pageRates") != null) cfg.pageRates = j.getJSONObject("pageRates");
         cfg.decisionRate=j.optString("decisionRate"); cfg.completionInput=j.optString("completionInput");
         cfg.completionOutput=j.optString("completionOutput"); cfg.completionCached=j.optString("completionCached");
         cfg.validate();

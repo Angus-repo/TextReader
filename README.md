@@ -2,7 +2,7 @@
 
 TextReader 是一個 Android 影像文字讀取工具。即時裁切文件或從相簿選圖後，由 Azure Decisions 判斷影像類型，再由 Azure Content Understanding 讀取全文。結果自動儲存在手機的「辨識紀錄」，同類型的多筆結果可分別開啟。
 
-**[下載 TextReader 1.6.3 APK](https://github.com/Angus-repo/TextReader/raw/refs/heads/main/apk/TextReader-1.6.3.apk)**。支援 Android 9 以上，沿用 1.0.0「台灣證件讀取」的套件名稱、簽署憑證與連線設定。
+目前版本為 **TextReader 1.7.0**。先前的 [1.6.3 APK](https://github.com/Angus-repo/TextReader/raw/refs/heads/main/apk/TextReader-1.6.3.apk) 可從主分支下載。支援 Android 9 以上，沿用 1.0.0「台灣證件讀取」的套件名稱、簽署憑證與連線設定。
 
 ## 使用方式
 
@@ -19,7 +19,7 @@ TextReader 是一個 Android 影像文字讀取工具。即時裁切文件或從
 
 首頁每筆紀錄列出 Token、API 耗時與美元估價。結果頁保留費用總額，點「Token 用量」或「辨識時間」旁的箭頭即可分別展開 Decisions 分類與 Content Understanding 讀取的明細。Token 明細列出模型回報的用量、頁數與費用。辨識時間是兩組 API 耗時的合計，從各自送出請求計至收到最終回應，包含等待 Content Understanding 分析完成的輪詢時間。重試按次列出。圖片準備、建立分析器、手動確認、手機端 OCR 與條碼補掃均不計入。舊紀錄保留當時的處理時間，新紀錄的分項耗時也會隨備份保存。
 
-費用採 2026-11-22 查核的 Global Standard 美元參考價。Microsoft Decision 1.1、Azure OpenAI Decisions、OCR 頁數、情境 token、GPT-5.2 與 text-embedding-3-large 依各自的計價項目計算。只讀一張照片且 Azure 缺少頁數時，依當次 Read 或 Layout 估算一頁並標示。缺少用量或模型單價時顯示已知小計。部署在不同區域或有議價折扣時，可於「連線設定 → 估算費用單價」填入模型費率。實際扣款以 Azure 帳單為準。
+費用採 2026-11-22 查核的 Global Standard 美元參考價。Microsoft Decision 1.1、Azure OpenAI Decisions、OCR 頁數、情境 token、GPT-5.2 與 text-embedding-3-large 依各自的計價項目計算。結果並列所選強度與 Azure 回報的計費級別、頁數、單價及費用。只讀全文且無頁數回報時，依照片張數或文字長度推估並標示。缺少用量或模型單價時顯示已知小計。部署在不同區域或有議價折扣時，可於「連線設定 → 估算費用單價」填入模型與非同步頁數的合約費率。實際扣款以 Azure 帳單為準。
 
 [Microsoft Decision 1.1 費率](https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/introducing-microsoft-decision-1-1-build-faster-more-efficient-ai-applications-w/4573877) · [Azure OpenAI Decisions 費率](https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/azure-openai-decisions-api-now-generally-available-in-microsoft-foundry/4567265) · [Content Understanding 計價](https://learn.microsoft.com/azure/ai-services/content-understanding/pricing-explainer)
 
@@ -41,15 +41,18 @@ TextReader 是一個 Android 影像文字讀取工具。即時裁切文件或從
 
 | 已選的讀取方式 | Content Understanding 分析器 |
 | --- | --- |
-| 收據或表單的全文 | prebuilt-layout |
-| 其他類型的全文，含無法歸類的影像 | prebuilt-read |
+| Minimal 全文 | 手機 ML Kit 中文 OCR 讀取照片，將 UTF-8 純文字送至 prebuilt-digitalParse |
+| Basic 全文 | 將照片送至 prebuilt-read |
+| Standard 全文 | 將照片送至 prebuilt-layout |
 | 全文及已設定的欄位 | 使用該類型的自訂分析器，一次讀取全文與欄位；未設定欄位的類型只讀全文 |
+
+從「辨識規則 → 文件類型 → 內容擷取強度」選擇模式後按「儲存辨識規則」。儲存後同一強度同時適用全文與自訂欄位。既有規則在首次儲存前沿用原分析器。未指定強度時，收據與表單全文使用 Standard，其他類型全文使用 Basic。Minimal 模式下，Azure 欄位模型只收到手機 OCR 的純文字，無法看到原圖、格線或印章。手機 OCR 無文字或模型未就緒時會提示重試。
 
 自訂欄位需要在 Content Understanding 設定文字生成模型（例如 gpt-5.2）及向量模型 text-embedding-3-large 的部署對應，並允許建立分析器。App 的 completion 欄填入文字生成模型的名稱。首次擷取新版欄位時會使用與其描述相符的分析器。
 
 ## 資料處理
 
-App 支援系統截圖。即時辨識會在裁切成功後上傳。若選擇先預覽或使用相簿，則於按下「開始辨識」後上傳。縮圖傳送至 Decisions，重新編碼的影像傳送至 Content Understanding。辨識紀錄儲存在 App 私有資料庫，包含原文、欄位結果及辨識時的類型設定。照片和 Azure 金鑰不寫入辨識紀錄或匯出備份。首頁的「清除所有紀錄」可刪除本機歷史。相機暫存檔於載入後刪除，連線設定由 Android Keystore 提供的 AES-GCM 金鑰加密，停用系統自動備份。
+App 支援系統截圖。即時辨識會在裁切成功後上傳。若選擇先預覽或使用相簿，則於按下「開始辨識」後上傳。縮圖傳送至 Decisions，Basic 與 Standard 將重新編碼的影像傳送至 Content Understanding，Minimal 則傳送手機 OCR 產生的純文字。辨識紀錄儲存在 App 私有資料庫，包含原文、欄位結果及辨識時的類型設定。照片和 Azure 金鑰不寫入辨識紀錄或匯出備份。首頁的「清除所有紀錄」可刪除本機歷史。相機暫存檔於載入後刪除，連線設定由 Android Keystore 提供的 AES-GCM 金鑰加密，停用系統自動備份。
 
 ## 編譯與簽署
 

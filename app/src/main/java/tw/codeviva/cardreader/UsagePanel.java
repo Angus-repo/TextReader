@@ -49,6 +49,15 @@ final class UsagePanel {
         TextView amount = ui.text(money(usage), 23, GREEN, true);
         amount.setTextIsSelectable(true);
         total.addView(amount);
+        if (usage.optBoolean("inferredPages"))
+            total.addView(ui.text("含依上傳內容推估的頁數", 13, MUTED, false));
+        JSONArray operations = usage.optJSONArray("operations");
+        if (operations != null) {
+            for (int i = 0; i < operations.length(); i++) {
+                JSONObject op = operations.optJSONObject(i);
+                if (op != null && op.has("requestedMode")) pageDetails(total, op);
+            }
+        }
         card.addView(total);
         ui.gap(card, 14);
         boolean apiTiming = usage.has("apiElapsedMs");
@@ -57,7 +66,6 @@ final class UsagePanel {
         LinearLayout time = disclosure(card, apiTiming ? "辨識時間" : "舊版處理時間", ScanUsage.timeText(usage), "time");
         if (!apiTiming) time.addView(ui.text("這筆紀錄只保存整體處理時間，各 API 耗時未記錄。", 14, MUTED, false));
 
-        JSONArray operations = usage.optJSONArray("operations");
         if (operations == null || operations.length() == 0) {
             tokens.addView(ui.text("沒有分項用量紀錄。", 14, MUTED, false));
             if (apiTiming) time.addView(ui.text("沒有 API 呼叫紀錄。", 14, MUTED, false));
@@ -94,6 +102,25 @@ final class UsagePanel {
         if (usage.optBoolean("partialCost")) card.addView(ui.text("小計僅含已知用量與單價。", 13, GREEN, true));
         card.addView(ui.text(usage.optString("rateBasis"), 12, MUTED, false));
         return card;
+    }
+
+    private void pageDetails(LinearLayout group, JSONObject op) {
+        ui.gap(group, 8);
+        group.addView(ui.text("內容擷取 · 規則選用 " + op.optString("requestedMode"), 14, GREEN, true));
+        JSONArray charges = op.optJSONArray("pageCharges");
+        if (charges == null) {
+            group.addView(ui.text("Azure 未回報計費頁數，擷取費用待確認。", 13, MUTED, false));
+            return;
+        }
+        String source = op.optBoolean("inferredPages") ? "推估" : "Azure 回報";
+        if (charges.length() == 0) group.addView(ui.text(source + " 0 頁 · US$0", 13, MUTED, false));
+        for (int i = 0; i < charges.length(); i++) {
+            JSONObject line = charges.optJSONObject(i);
+            if (line == null) continue;
+            String mode = line.optString("mode") + (line.optBoolean("inline") ? " 同步" : "");
+            group.addView(ui.text(source + " " + mode + " " + count(line, "pages") + " 頁 · "
+                    + money(line) + "（US$" + line.optString("perThousandUsd") + "／千頁）", 13, MUTED, false));
+        }
     }
 
     private LinearLayout disclosure(LinearLayout card, String label, String value, String key) {
@@ -171,7 +198,7 @@ final class UsagePanel {
         List<String> parts = new ArrayList<>();
         if (op.has("input")) parts.add("輸入 " + count(op,"input"));
         if (op.has("output")) parts.add("輸出 " + count(op,"output"));
-        if (op.has("pages")) parts.add(count(op,"pages") + (op.optBoolean("inferredPages") ? " 頁（依上傳影像估計）" : " 頁"));
+        if (op.has("pages")) parts.add(count(op,"pages") + (op.optBoolean("inferredPages") ? (op.optString("requestedMode").equals("Minimal") ? " 頁（依文字長度估計）" : " 頁（依上傳影像估計）") : " 頁"));
         if (op.has("contextTokens")) parts.add("情境 " + count(op,"contextTokens") + " tokens");
         if (op.has("advancedContextTokens")) parts.add("進階情境 " + count(op,"advancedContextTokens") + " tokens");
         if (!parts.isEmpty()) {

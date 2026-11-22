@@ -262,7 +262,7 @@ final class AzureReader {
         }
     }
 
-    Reading read(CardCatalog.Card type, byte[] jpeg, boolean includeFields, Progress progress) throws Exception {
+    Reading read(CardCatalog.Card type, byte[] document, boolean includeFields, Progress progress) throws Exception {
         String base = config.cuRoot + "/contentunderstanding/analyzers/";
         boolean structured = includeFields && type.hasFields();
         if (structured && config.cuModel.startsWith("text-embedding-")) {
@@ -273,10 +273,15 @@ final class AzureReader {
             ensureAnalyzer(type, base + analyzer, progress);
         }
         progress.show("正在讀取" + type.label + "的文字…");
-        JSONObject input = obj("name", "scan.jpg", "mimeType", "image/jpeg",
-            "data", Base64.encodeToString(jpeg, Base64.NO_WRAP));
+        boolean digital = type.extraction == ExtractionMode.MINIMAL;
+        JSONObject input = obj("name", digital ? "scan.txt" : "scan.jpg", "mimeType", digital ? "text/plain" : "image/jpeg",
+            "data", Base64.encodeToString(document, Base64.NO_WRAP));
         JSONObject request = obj("inputs", new JSONArray().put(input));
-        JSONObject op = usage.begin(ScanUsage.CONTENT).put("analyzer", analyzer);
+        JSONObject op = usage.begin(ScanUsage.CONTENT).put("analyzer", analyzer).put("requestedMode", structured && !type.explicitExtraction ? "既有欄位分析器" : type.extraction.label);
+        if (digital) {
+            String text = new String(document, StandardCharsets.UTF_8);
+            op.put("textPageEstimate", (text.codePointCount(0, text.length()) + 2999L) / 3000);
+        }
         if (structured) op.put("model", config.cuModel);
         ScanUsage.ApiWindow timer = new ScanUsage.ApiWindow(op);
         Reply start = transport.callTimed("POST", base + analyzer + ":analyze" + VERSION,

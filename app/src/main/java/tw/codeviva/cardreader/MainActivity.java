@@ -364,7 +364,9 @@ public class MainActivity extends Activity {
         boolean fields = fieldMode == 1 || (fieldMode == 0 && type.autoFields);
         int token = sequence + 1;
         run("正在讀取" + type.label + "的文字…", () -> {
-            AzureReader.Reading reading = api.read(type, bytes, fields, message -> runOnUiThread(() -> {
+            byte[] document = type.extraction == ExtractionMode.MINIMAL
+                    ? DeviceText.transcribe(this, bytes).getBytes(java.nio.charset.StandardCharsets.UTF_8) : bytes;
+            AzureReader.Reading reading = api.read(type, document, fields, message -> runOnUiThread(() -> {
                 if (sequence == token && busy && !isDestroyed()) {
                     status = message;
                     preview();
@@ -433,13 +435,13 @@ public class MainActivity extends Activity {
         for (CardCatalog.Card card : catalog.cards.values()) {
             if (list.getChildCount() > 0) ui.line(list);
             String status = card.hasFields() ? card.fields.length() + " 個欄位" : "全文";
-            ui.tile(list, card.label, status, card.autoFields, card.criteria, () -> editRule(card.code));
+            ui.tile(list, card.label, status + " · " + card.extraction.label, card.autoFields, card.criteria, () -> editRule(card.code));
         }
     }
 
     private void editRule(String code) {
         shell("editRule", code == null ? "新增自訂類型" : "編輯辨識規則", () -> ruleEditor.back());
-        ruleEditor = new RuleEditor(this, ui, content, catalog, code, this::rules);
+        ruleEditor = new RuleEditor(this, ui, content, catalog, code, config, this::rules);
     }
 
     private void settings(){
@@ -463,7 +465,7 @@ public class MainActivity extends Activity {
             }
         });
         ui.gap(content,12);LinearLayout cu=ui.panel();content.addView(cu);heading(cu,"Content Understanding");
-        ui.gap(cu,6);note(cu,"全文使用內建 Read 或 Layout 分析器。若啟用自訂欄位，才需另設擷取模型與 text-embedding-3-large 的部署對應，並允許建立分析器。");
+        ui.gap(cu,6);note(cu,"全文依辨識規則使用 Digital Parse、Read 或 Layout 分析器。若啟用自訂欄位，才需另設擷取模型與 text-embedding-3-large 的部署對應，並允許建立分析器。");
         EditText ce=field(cu,"Content Understanding 資源端點",config.cuRoot,"https://資源名稱.services.ai.azure.com",false);
         EditText ck=field(cu,"Content Understanding API 金鑰",config.cuKey,"同一資源可填相同金鑰",true);
         EditText cm=field(cu,"自訂欄位用文字生成模型（completion）",config.cuModel,"例如 gpt-5.2",false);
@@ -480,6 +482,14 @@ public class MainActivity extends Activity {
         EditText completionIn = field(prices, "欄位模型輸入", config.completionInput, "依部署模型", false);
         EditText completionOut = field(prices, "欄位模型輸出", config.completionOutput, "依部署模型", false);
         EditText completionCache = field(prices, "欄位模型快取輸入", config.completionCached, "依部署模型", false);
+        note(prices, "內容擷取單價以每 1,000 頁的美元金額計算。若 Azure 合約有不同的非同步費率，可在此填入。");
+        java.util.EnumMap<ExtractionMode, EditText> pagePrices = new java.util.EnumMap<>(ExtractionMode.class);
+        for (ExtractionMode mode : ExtractionMode.values()) {
+            EditText price = field(prices, mode.label + "（每 1,000 頁）", config.pageRates.optString(mode.label),
+                    mode.referenceRate.toPlainString(), false);
+            price.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+            pagePrices.put(mode, price);
+        }
         for (EditText price : new EditText[]{decisionPrice, completionIn, completionOut, completionCache})
             price.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
         ui.gap(content,12);TextView msg=ui.text("",14,0xff863b24,false);msg.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);content.addView(msg);
@@ -489,7 +499,10 @@ public class MainActivity extends Activity {
             c.cuRoot=ce.getText().toString().trim();c.cuKey=ck.getText().toString().trim();c.cuModel=cm.getText().toString().trim();
             c.decisionRate=decisionPrice.getText().toString().trim(); c.completionInput=completionIn.getText().toString().trim();
             c.completionOutput=completionOut.getText().toString().trim(); c.completionCached=completionCache.getText().toString().trim();
-            try{c.save(this);config=c;leaveSettings();Toast.makeText(this,"已儲存連線設定",Toast.LENGTH_SHORT).show();}
+            try{
+                for (ExtractionMode mode : ExtractionMode.values())
+                    c.pageRates.put(mode.label, pagePrices.get(mode).getText().toString().trim());
+                c.save(this);config=c;leaveSettings();Toast.makeText(this,"已儲存連線設定",Toast.LENGTH_SHORT).show();}
             catch(Exception ex){msg.setText(ex instanceof IllegalArgumentException?ex.getMessage():"無法使用 Android Keystore 儲存設定。");}
         }));
         if(config.ready()){
