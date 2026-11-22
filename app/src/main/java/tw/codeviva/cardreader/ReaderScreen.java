@@ -38,11 +38,30 @@ final class ReaderScreen {
         b.setBackground(new RippleDrawable(ColorStateList.valueOf(0x301e8a73),bg(primary?GREEN:PALE,12,false),null));
         pad(b,10,7);b.setOnClickListener(v->r.run());return b;
     }
-    void tile(LinearLayout parent,String title,String state,boolean complete,Runnable open) {
-        LinearLayout r=row();r.setMinimumHeight(dp(50));r.setOnClickListener(v->open.run());r.setFocusable(true);
-        weight(r,text(title,16,INK,false));TextView badge=text(state,13,complete?GREEN:MUTED,complete);
-        if(complete){badge.setBackground(bg(PALE,8,false));pad(badge,8,3);}r.addView(badge);gap(r,8);
-        r.addView(text("›",22,MUTED,false));parent.addView(r);
+    void tile(LinearLayout parent, String title, String state, boolean complete, String description, Runnable open) {
+        LinearLayout item = col();
+        item.setOnClickListener(v -> open.run());
+        item.setFocusable(true);
+        LinearLayout header = row();
+        header.setMinimumHeight(dp(description == null ? 50 : 42));
+        weight(header, text(title, 16, INK, false));
+        TextView badge = text(state, 13, complete ? GREEN : MUTED, complete);
+        if (complete) {
+            badge.setBackground(bg(PALE, 8, false));
+            pad(badge, 8, 3);
+        }
+        header.addView(badge);
+        gap(header, 8);
+        header.addView(text("›", 22, MUTED, false));
+        item.addView(header);
+        if (description != null) {
+            TextView preview = text(description, 14, MUTED, false);
+            preview.setMaxLines(2);
+            preview.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            item.addView(preview);
+            gap(item, 10);
+        }
+        parent.addView(item);
     }
     static final class PageArt extends View {
         private final Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);

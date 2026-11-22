@@ -2,7 +2,7 @@
 
 TextReader 是一個 Android 影像文字讀取工具。拍照或從相簿選圖後，由 Azure Decisions 判斷影像類型，再由 Azure Content Understanding 讀取全文。結果保留在本次掃描清單，同類型的多筆結果可分別開啟。
 
-**[下載 TextReader 1.2.0 APK](https://github.com/Angus-repo/TextReader/raw/refs/heads/main/apk/TextReader-1.2.0.apk)**。支援 Android 9 以上，沿用 1.0.0「台灣證件讀取」的套件名稱、簽署憑證與連線設定。
+**[下載 TextReader 1.2.1 APK](https://github.com/Angus-repo/TextReader/raw/refs/heads/main/apk/TextReader-1.2.1.apk)**。支援 Android 9 以上，沿用 1.0.0「台灣證件讀取」的套件名稱、簽署憑證與連線設定。
 
 ## 使用方式
 
@@ -13,7 +13,7 @@ TextReader 是一個 Android 影像文字讀取工具。拍照或從相簿選圖
 
 ## 依描述設定辨識規則
 
-在首頁點「辨識規則」，選擇內建類型或「新增自訂類型」。每個類型可設定：
+在首頁點「辨識規則」，選擇內建類型或「新增自訂類型」。11 個內建類型已預填分類描述與共 62 個欄位的讀取說明。規則清單可預覽分類描述，點入後可修改。新增自訂類型時，可按「帶入內建範例」複製一份分類描述與欄位，再為新類型命名及調整。已自行儲存的類型優先使用手機上的版本，點「還原此類型的預設規則」可取代該類型的自訂內容。每個類型可設定：
 
 - **分類描述**：填寫這個類型獨有的標題、版面及正反面特徵。兩種 Decisions 服務均會使用儲存後的描述。
 - **欄位名稱與讀取描述**：可以新增、修改或移除欄位。例如「健保卡卡號」可描述為「讀取卡片下方的 12 碼卡號，保留開頭的 0」。
@@ -27,7 +27,7 @@ TextReader 是一個 Android 影像文字讀取工具。拍照或從相簿選圖
 | 其他類型的全文，含無法歸類的影像 | prebuilt-read |
 | 全文及已設定的欄位 | 使用該類型的自訂分析器，一次讀取全文與欄位；未設定欄位的類型只讀全文 |
 
-自訂欄位需要在 Content Understanding 設定擷取模型及 text-embedding-3-large 的部署對應，並允許建立分析器。首次使用內建證件規則時可沿用既有 1.0 或 1.1 分析器。
+自訂欄位需要在 Content Understanding 設定擷取模型及 text-embedding-3-large 的部署對應，並允許建立分析器。首次擷取新版欄位時會使用與其描述相符的分析器。
 
 ## 資料處理
 

@@ -45,7 +45,7 @@ public class CardReaderTest {
             }
         }
     }
-    @Test public void createPollAnalyzeAndReadAllFiveSides() throws Exception {
+    @Test public void createPollAnalyzeAndReadAllPresetTypes() throws Exception {
         for(CardCatalog.Card card:catalog.cards.values()){
             if (!card.hasFields()) continue;
             String url=ROOT+"/contentunderstanding/analyzers/"+card.analyzerId(config.cuModel);
@@ -150,7 +150,7 @@ public class CardReaderTest {
         for (String content : Arrays.asList("未歸類文字", "")) {
             AzureReader api = new AzureReader(catalog, config, (m,u,h,k,b) ->
                 reply(200, null, obj("result",obj("contents",new JSONArray().put(obj("markdown",content))))), ms -> {});
-            AzureReader.Reading result = api.read(catalog.cards.get("other"),new byte[]{1},true,msg -> {});
+            AzureReader.Reading result = api.read(catalog.cards.get("other"),new byte[]{1},false,msg -> {});
             assertEquals(content, result.text);
             assertNull(result.fields);
         }
@@ -196,7 +196,7 @@ public class CardReaderTest {
         }
     }
 
-    @Test public void editingCriteriaDoesNotReplaceLegacyAnalyzerButChangedFieldsGetNewSchema() throws Exception {
+    @Test public void editingCriteriaReusesAnalyzerButChangedFieldsGetNewSchema() throws Exception {
         CardCatalog.Card original = catalog.cards.get("nhi_front");
         String oldId = original.analyzerId(config.cuModel);
         String criteria = "右側印有全民健康保險字樣。";
@@ -318,6 +318,73 @@ public class CardReaderTest {
             }
         }
         return null;
+    }
+
+    @Test public void everyPresetShowsEditableDescriptionsAndUsesThemForExtraction() throws Exception {
+        int fieldCount = 0;
+        for (CardCatalog.Card type : catalog.cards.values()) {
+            assertFalse(type.criteria.trim().isEmpty());
+            assertTrue(type.label, type.hasFields());
+            assertFalse(type.autoFields);
+            assertFalse(type.analyzerId(config.cuModel).startsWith("twcard-v1-"));
+            JSONObject fields = type.schema(config.cuModel).getJSONObject("fieldSchema").getJSONObject("fields");
+            for (int i = 0; i < type.fields.length(); i++) {
+                JSONObject field = type.fields.getJSONObject(i);
+                String description = field.getString("description");
+                assertFalse(description.trim().isEmpty());
+                assertTrue(fields.getJSONObject(field.getString("key")).getString("description").contains(description));
+                fieldCount++;
+            }
+        }
+        assertEquals(62, fieldCount);
+        try (ActivityController<MainActivity> controller = Robolectric.buildActivity(MainActivity.class).setup()) {
+            View root = controller.get().findViewById(android.R.id.content);
+            find(root, "辨識規則").performClick();
+            CardCatalog.Card receipt = catalog.cards.get("receipt");
+            View preview = find(root, receipt.criteria);
+            assertNotNull(preview);
+            ((View)preview.getParent()).performClick();
+            assertEquals(receipt.criteria, inputByLabel(root, "分類描述").getText().toString());
+            String firstDescription = receipt.fields.getJSONObject(0).getString("description");
+            assertEquals(firstDescription, inputByLabel(root, "讀取描述").getText().toString());
+        }
+    }
+
+    @Test public void upgradeKeepsSavedRulesEvenWhenOldRuleHasNoFields() throws Exception {
+        CardCatalog.Card preset = catalog.cards.get("receipt");
+        JSONObject saved = obj("code", "receipt", "label", "我的收據", "criteria", "櫃檯列印的交易憑證",
+            "fields", new JSONArray(), "autoFields", false);
+        RuntimeEnvironment.getApplication().getSharedPreferences("document_rules_v1", 0).edit()
+            .putString("receipt", saved.toString()).commit();
+        CardCatalog loaded = new CardCatalog(RuntimeEnvironment.getApplication());
+        assertEquals("櫃檯列印的交易憑證", loaded.cards.get("receipt").criteria);
+        assertEquals(0, loaded.cards.get("receipt").fields.length());
+        loaded.reset("receipt");
+        assertEquals(preset.criteria, loaded.cards.get("receipt").criteria);
+        assertEquals(preset.fields.toString(), loaded.cards.get("receipt").fields.toString());
+    }
+
+    @Test public void newTypeCanPrefillFromBuiltInWithoutOverwritingNameOrExistingRule() throws Exception {
+        try (ActivityController<MainActivity> controller = Robolectric.buildActivity(MainActivity.class).setup()) {
+            View root = controller.get().findViewById(android.R.id.content);
+            find(root, "辨識規則").performClick();
+            find(root, "新增自訂類型").performClick();
+            inputByLabel(root, "類型名稱").setText("供應商收據");
+            find(root, "帶入內建範例").performClick();
+            android.app.AlertDialog dialog = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+            android.widget.ListView list = dialog.getListView();
+            int receipt = new ArrayList<>(catalog.cards.keySet()).indexOf("receipt");
+            list.performItemClick(null, receipt, list.getAdapter().getItemId(receipt));
+            assertEquals("供應商收據", inputByLabel(root, "類型名稱").getText().toString());
+            CardCatalog.Card source = catalog.cards.get("receipt");
+            assertEquals(source.criteria, inputByLabel(root, "分類描述").getText().toString());
+            assertEquals("商家名稱", inputByLabel(root, "欄位名稱").getText().toString());
+            inputByLabel(root, "分類描述").setText("列明供應商編號及應付總額");
+            find(root, "儲存辨識規則").performClick();
+            CardCatalog after = new CardCatalog(RuntimeEnvironment.getApplication());
+            assertEquals(source.criteria, after.cards.get("receipt").criteria);
+            assertEquals(12, after.cards.size());
+        }
     }
 
     private static void setField(MainActivity activity, String fieldName, Object value) throws Exception {

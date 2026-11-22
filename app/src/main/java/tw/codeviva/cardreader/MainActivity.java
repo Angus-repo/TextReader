@@ -96,7 +96,7 @@ public class MainActivity extends Activity {
                 final int index = i;
                 AzureReader.Reading reading = results.get(i);
                 if (i < results.size() - 1) ui.line(list);
-                ui.tile(list, reading.type.label, "第 " + (i + 1) + " 筆", true, () -> detail(index));
+                ui.tile(list, reading.type.label, "第 " + (i + 1) + " 筆", true, null, () -> detail(index));
             }
         }
         ui.gap(content, 14);
@@ -327,7 +327,7 @@ public class MainActivity extends Activity {
         for (CardCatalog.Card card : catalog.cards.values()) {
             if (list.getChildCount() > 0) ui.line(list);
             String status = card.hasFields() ? card.fields.length() + " 個欄位" : "全文";
-            ui.tile(list, card.label, status, card.autoFields, () -> editRule(card.code));
+            ui.tile(list, card.label, status, card.autoFields, card.criteria, () -> editRule(card.code));
         }
     }
 

@@ -41,6 +41,10 @@ final class RuleEditor {
         code = existingCode == null ? "doc_" + identifier() : existingCode;
         CardCatalog.Card card = catalog.cards.get(code);
         body.setFocusableInTouchMode(true);
+        if (card == null) {
+            body.addView(ui.action("帶入內建範例", false, this::chooseTemplate));
+            ui.gap(body, 12);
+        }
         LinearLayout section = ui.panel();
         body.addView(section);
         name = input(section, "類型名稱", card == null ? "" : card.label, "例如：員工識別證正面", false);
@@ -81,6 +85,35 @@ final class RuleEditor {
                 .setNegativeButton("取消", null).setPositiveButton(builtIn ? "還原" : "刪除", (dialog, which) -> reset()).show()));
         }
         initial = draft();
+    }
+
+    private void chooseTemplate() {
+        ArrayList<CardCatalog.Card> templates = new ArrayList<>(catalog.builtInTemplates());
+        String[] labels = new String[templates.size()];
+        for (int i = 0; i < templates.size(); i++) labels[i] = templates.get(i).label;
+        new AlertDialog.Builder(activity).setTitle("選擇要帶入的範例")
+            .setItems(labels, (dialog, which) -> {
+                CardCatalog.Card template = templates.get(which);
+                if (criteria.length() == 0 && rows.isEmpty()) {
+                    applyTemplate(template);
+                } else {
+                    new AlertDialog.Builder(activity).setTitle("取代草稿中的分類描述和欄位？")
+                        .setNegativeButton("取消", null)
+                        .setPositiveButton("帶入", (confirm, action) -> applyTemplate(template)).show();
+                }
+            }).show();
+    }
+
+    private void applyTemplate(CardCatalog.Card template) {
+        criteria.setText(template.criteria);
+        fieldList.removeAllViews();
+        rows.clear();
+        for (int i = 0; i < template.fields.length(); i++) {
+            JSONObject field = template.fields.optJSONObject(i);
+            addRow(field.optString("key"), field.optString("label"), field.optString("description"));
+        }
+        error.setText("");
+        Toast.makeText(activity, "已帶入" + template.label + "範例，可依需求修改", Toast.LENGTH_SHORT).show();
     }
 
     private static String identifier() {

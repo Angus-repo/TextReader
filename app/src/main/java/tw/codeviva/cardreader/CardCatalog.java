@@ -19,16 +19,13 @@ final class CardCatalog {
         final String code, label, criteria;
         final JSONArray fields;
         final boolean autoFields;
-        private final boolean legacySchema;
 
-        private Card(JSONObject json, Card original, boolean builtIn) throws JSONException {
+        private Card(JSONObject json) throws JSONException {
             code = json.getString("code");
             label = json.getString("label");
             criteria = json.getString("criteria");
             fields = json.getJSONArray("fields");
             autoFields = json.optBoolean("autoFields") && hasFields();
-            legacySchema = builtIn || (original != null && original.label.equals(label)
-                && original.fields.toString().equals(fields.toString()));
         }
 
         boolean hasFields() {
@@ -43,23 +40,18 @@ final class CardCatalog {
             JSONObject definitions = new JSONObject();
             for (int i = 0; i < fields.length(); i++) {
                 JSONObject field = fields.getJSONObject(i);
-                String description = field.getString("description");
-                if (legacySchema) {
-                    description += " 逐字擷取本面可見值，保留原始紀年與前導零。空白或無法辨讀請省略，不推測。";
-                } else {
-                    description = field.getString("label") + "。" + description + " 空白或無法辨讀請省略，不推測。";
-                }
+                String description = field.getString("label") + "。" + field.getString("description")
+                    + " 空白或無法辨讀請省略，不推測。";
                 definitions.put(field.getString("key"), obj("type", "string", "method", "extract",
                     "description", description));
             }
-            return obj("baseAnalyzerId", "prebuilt-document", "description", legacySchema ? "台灣" + label : label,
+            return obj("baseAnalyzerId", "prebuilt-document", "description", label,
                 "models", obj("completion", model, "embedding", "text-embedding-3-large"),
                 "config", obj("enableOcr", true, "returnDetails", true, "estimateFieldSourceAndConfidence", true),
-                "fieldSchema", obj("name", legacySchema ? "TaiwanCard" : "DocumentFields", "fields", definitions));
+                "fieldSchema", obj("name", "DocumentFields", "fields", definitions));
         }
 
         String analyzerId(String model) throws JSONException {
-            if (legacySchema) return "twcard-v1-" + code + "-" + model;
             // Azure analyzers are immutable here. Identical extraction rules share the same analyzer.
             try {
                 byte[] bytes = (code + "\n" + schema(model).toString()).getBytes(StandardCharsets.UTF_8);
@@ -78,7 +70,7 @@ final class CardCatalog {
         try (InputStream in = context.getAssets().open("document-types.json")) {
             JSONArray rows = new JSONArray(read(in, 100000));
             for (int i = 0; i < rows.length(); i++) {
-                Card card = new Card(rows.getJSONObject(i), null, true);
+                Card card = new Card(rows.getJSONObject(i));
                 defaults.put(card.code, card);
             }
         }
@@ -89,13 +81,17 @@ final class CardCatalog {
         LinkedHashMap<String, Card> next = new LinkedHashMap<>(defaults);
         for (String code : new TreeSet<>(preferences.getAll().keySet())) {
             JSONObject json = new JSONObject(preferences.getString(code, ""));
-            Card card = new Card(json, defaults.get(code), false);
+            Card card = new Card(json);
             next.put(code, card);
         }
         Card fallback = next.remove(OTHER);
         next.put(OTHER, fallback);
         cards.clear();
         cards.putAll(next);
+    }
+
+    Collection<Card> builtInTemplates() {
+        return Collections.unmodifiableCollection(defaults.values());
     }
 
     boolean builtIn(String code) {

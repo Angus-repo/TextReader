@@ -2,257 +2,388 @@
   {
     "code": "id_front",
     "label": "身分證正面",
-    "criteria": "國民身分證，含姓名、相片、發證日期、統一編號。",
+    "criteria": "國民身分證正面。辨認「國民身分證」標題，以及同面列出的姓名、出生年月日、發證日期與統一編號；發證日期旁常有縣市和領補換註記。",
     "fields": [
       {
         "key": "Name",
         "label": "姓名",
-        "description": "持證人完整姓名（含原住民族並列姓名，如有）。"
+        "description": "讀取「姓名」欄完整印字。若同欄另列族語姓名或羅馬拼音，一併保留原順序、空格與符號。"
       },
       {
         "key": "IdNumber",
         "label": "身分證字號",
-        "description": "卡面統一編號。"
+        "description": "讀取「統一編號」欄的英文字母及數字，依卡面順序保留。若字元被遮住或模糊，請勿依號碼格式補猜。"
       },
       {
         "key": "BirthDate",
         "label": "出生日期",
-        "description": "民國出生年月日，依印字保留。"
+        "description": "讀取「出生年月日」旁的日期，保留民國紀年及原有年月日寫法；發證日期另列。"
       },
       {
         "key": "Sex",
         "label": "性別",
-        "description": "卡面性別。"
+        "description": "讀取「性別」欄實際印出的文字。只以此欄印字為依據。"
       },
       {
         "key": "IssueDate",
         "label": "發證日期",
-        "description": "發證年月日。"
+        "description": "從「發證日期」一行擷取年月日，保留原紀年；同一行的縣市及初補換發文字分別填入其他欄位。"
       },
       {
         "key": "IssuePlace",
         "label": "發證地點",
-        "description": "發證日期旁括號內的縣市。"
+        "description": "讀取發證日期旁括號內的縣市名稱或簡稱，例如「北市」；依原字保留簡稱。"
       },
       {
         "key": "IssueType",
         "label": "領補換類別",
-        "description": "初發、補發或換發等實際印字。"
+        "description": "讀取發證日期同一行標示的領發類別，例如「初發」「補發」或「換發」，保留原文。"
       }
     ]
   },
   {
     "code": "id_back",
     "label": "身分證反面",
-    "criteria": "國民身分證背面，有父、母、配偶、出生地、住址、役別等欄。",
+    "criteria": "國民身分證反面。以「父」「母」「配偶」「役別」「出生地」「住址」等欄名組合辨認；即使親屬欄空白，仍可依欄名與地址版面判斷。",
     "fields": [
       {
         "key": "Father",
         "label": "父姓名",
-        "description": "父欄姓名。"
+        "description": "讀取「父」欄所列完整姓名，保留同欄並列文字；空白或只有橫線時留空。"
       },
       {
         "key": "Mother",
         "label": "母姓名",
-        "description": "母欄姓名。"
+        "description": "讀取「母」欄所列完整姓名，保留同欄並列文字；請依欄名區分相鄰的父欄。"
       },
       {
         "key": "Spouse",
         "label": "配偶姓名",
-        "description": "配偶欄姓名。"
+        "description": "讀取「配偶」欄完整姓名及同欄附註；只有空白或橫線時留空。"
       },
       {
         "key": "MilitaryService",
         "label": "役別",
-        "description": "役別。"
+        "description": "照錄「役別」欄的文字或代碼。若欄位未填，請留空。"
       },
       {
         "key": "Birthplace",
         "label": "出生地",
-        "description": "出生地。"
+        "description": "讀取「出生地」後的縣市、地區或國名，保留卡面用字；戶籍住址另列。"
       },
       {
         "key": "Address",
         "label": "戶籍地址",
-        "description": "住址完整文字（含村里鄰、樓層）。"
+        "description": "讀取「住址」欄的完整地址。若跨行，依序接回縣市、區鄉鎮、村里鄰、路段、巷弄、門牌與樓層。"
       },
       {
         "key": "Serial",
         "label": "證件流水號",
-        "description": "僅擷取可見的卡片流水號。"
+        "description": "讀取反面右下方條碼旁可見的空白證流水號，保留前導零。若數字遭遮蔽，請留空；右上方膠膜號另有用途。"
       }
     ]
   },
   {
     "code": "nhi_front",
     "label": "健保卡正面",
-    "criteria": "全民健康保險卡正面，有健保標誌、持卡人姓名、晶片或健保卡卡號；可為無照片版。",
+    "criteria": "全民健康保險卡正面。以健保標誌或「全民健康保險」字樣，搭配持卡人資料、晶片或卡面下方的健保卡號辨認；無照片版也屬此類。",
     "fields": [
       {
         "key": "Name",
         "label": "姓名",
-        "description": "持卡人完整姓名。"
+        "description": "讀取持卡人資料區的完整姓名，保留同欄外文拼寫、空格及符號。"
       },
       {
         "key": "IdNumber",
         "label": "身分證／居留證號",
-        "description": "印在卡片上的身分證字號或居留證統一證號。"
+        "description": "讀取姓名附近的身分證字號或居留證統一證號，依原順序保留字母與數字；健保卡卡號另列。"
       },
       {
         "key": "BirthDate",
         "label": "出生日期",
-        "description": "印在卡上的出生日期。"
+        "description": "讀取持卡人資料區的出生日期，保留原始紀年、月日與分隔符號。"
       },
       {
         "key": "Sex",
         "label": "性別",
-        "description": "僅擷取有明文印製的性別，不從姓名、號碼或照片推定。"
+        "description": "卡面有明文標示性別時才照錄；未印出時留空，勿由相片、姓名或證號推算。"
       },
       {
         "key": "NhiCardNumber",
         "label": "健保卡卡號",
-        "description": "卡面下方的健保卡號，保留前導零，與身分證號區分。"
+        "description": "讀取卡面下方的 12 碼健保卡卡號，保留開頭的 0。若數字不完整，請勿以身分證號代填或補碼。"
       }
     ]
   },
   {
     "code": "dl_front",
     "label": "駕照正面",
-    "criteria": "臺灣汽車或機車駕駛執照正面，有相片、駕照號碼、種類與發照日期。",
+    "criteria": "汽車或機車駕駛執照正面。以「駕駛執照」標題，搭配駕照號碼、車種、發照或有效日期辨認。車種欄是與國民身分證正面區別的重要特徵。",
     "fields": [
       {
         "key": "Name",
         "label": "姓名",
-        "description": "持照人姓名。"
+        "description": "讀取「姓名」欄持照人的完整印字，保留並列的外文姓名。"
       },
       {
         "key": "LicenseNumber",
         "label": "駕照號碼",
-        "description": "駕駛執照號碼。"
+        "description": "讀取「駕照號碼」欄的完整字串，保留英文字母與前導零；管轄編號及背面印製號碼另列。"
       },
       {
         "key": "BirthDate",
         "label": "出生日期",
-        "description": "出生日期。"
+        "description": "讀取持照人的「出生日期」或「出生年月日」，保留原紀年與分隔符號。"
       },
       {
         "key": "Sex",
         "label": "性別",
-        "description": "卡面明載的性別。"
+        "description": "讀取「性別」欄已印出的文字；未印出時留空。"
       },
       {
         "key": "LicenseClass",
         "label": "駕照種類",
-        "description": "汽車或機車駕照種類的完整名稱。"
+        "description": "讀取「種類」或「駕照種類」欄完整車種名稱，例如普通小型車；保留普通、職業或機車級別等修飾詞。"
       },
       {
         "key": "ConditionCode",
         "label": "持照條件代碼",
-        "description": "正面條件欄填寫的代碼。"
+        "description": "讀取正面持照條件欄實際登載的代碼；背面印製的整張條件對照表不屬於此欄。"
       },
       {
         "key": "Address",
         "label": "地址",
-        "description": "正面完整地址。"
+        "description": "讀取正面「地址」或「住址」的全部文字，依原順序接續跨行門牌及樓層。"
       },
       {
         "key": "IssueDate",
         "label": "發照日期",
-        "description": "發照日期。"
+        "description": "讀取「發照日期」欄的年月日。若同時出現出生日期及有效日期，依各自標籤分開。"
       },
       {
         "key": "ExpiryDate",
         "label": "有效日期",
-        "description": "有效日期。"
+        "description": "讀取「有效日期」或有效期限欄的原文，保留日期或期限文字；空白時不依年齡推算。"
       },
       {
         "key": "ControlNumber",
         "label": "管轄／管制編號",
-        "description": "管轄或管制編號，保留前導零。"
+        "description": "讀取「管轄編號」或「管制編號」欄完整編碼，保留前導零並與駕照號碼分開。"
       },
       {
         "key": "Authority",
         "label": "發照機關",
-        "description": "核發機關。"
+        "description": "讀取發照或核發機關欄明載的機關全名；機關印章可清楚辨讀時亦可照錄。"
       }
     ]
   },
   {
     "code": "dl_back",
     "label": "駕照反面",
-    "criteria": "臺灣汽機車駕照背面，有印製號碼、動員編號、持照條件對照或住所變更紀錄。",
+    "criteria": "駕駛執照反面。可見印製號碼、持照條件對照、住所變更或職業駕駛審驗等欄；即使表格沒有填寫，仍可用固定欄名辨認。",
     "fields": [
       {
         "key": "PrintNumber",
         "label": "印製號碼",
-        "description": "印製號碼，包含括號及前綴。"
+        "description": "讀取「印製號碼」欄完整編碼，保留括號、機關字樣與前導零。"
       },
       {
         "key": "Mobilization",
         "label": "動員編號",
-        "description": "已填寫的動員編號。"
+        "description": "只讀「動員編號」欄實際填入的編號，空白或只有欄名時留空。"
       },
       {
         "key": "Conditions",
         "label": "持照條件加註",
-        "description": "僅擷取已填寫、勾選或加註的個別條件，勿將通用 A/B/C 圖例當成個人限制。"
+        "description": "讀取明確勾選、填寫或加註給持照人的條件。若只有通用 A、B、C 條件圖例，這一欄留空。"
       },
       {
         "key": "ChangeOfAddress",
         "label": "住所變更",
-        "description": "實際登記的住所變更。"
+        "description": "讀取「住所變更」內實際登記的地址，多筆依原列順序呈現；空表留空。"
       },
       {
         "key": "Registration",
         "label": "登記機關及日期",
-        "description": "已填寫的登記機關與年月日。"
+        "description": "讀取變更紀錄同列的登記機關及年月日。有多筆時保持每個機關與日期配對。"
       },
       {
         "key": "Records",
         "label": "審驗或紀錄",
-        "description": "職業駕駛審驗或其他已填寫紀錄。"
+        "description": "讀取已填入或蓋印的審驗日期及紀錄內容，多筆照原序列出；通用提醒文字不列入。"
       },
       {
         "key": "Notes",
         "label": "備註",
-        "description": "已填寫的個人備註。"
+        "description": "讀取「備註」或加註區實際填寫的內容，保留原文；空欄及通用注意事項略過。"
       }
     ]
   },
   {
     "code": "receipt",
     "label": "收據／發票",
-    "criteria": "購買收據、電子發票證明聯、帳單或交易明細，通常含金額、日期及品項。",
-    "fields": []
+    "criteria": "記錄一筆購買、收款或應付交易的收據、發票或帳單。以店家、交易日期、品項與合計金額的組合辨認；只有商品售價的價目表歸入標示。",
+    "fields": [
+      {
+        "key": "Merchant",
+        "label": "商家名稱",
+        "description": "讀取開立憑證的店家或銷售方名稱，含可見分店名；與買受人分開。"
+      },
+      {
+        "key": "SellerId",
+        "label": "賣方統一編號",
+        "description": "讀取賣方名稱附近明示的統一編號；僅有買方統編時留空。"
+      },
+      {
+        "key": "DocumentNumber",
+        "label": "發票／收據號碼",
+        "description": "讀取標為發票號碼或收據編號的完整字串，保留字軌、連字號及前導零；忽略隨機碼。"
+      },
+      {
+        "key": "TransactionDate",
+        "label": "交易日期",
+        "description": "讀取交易、收款或開立日期，依原紀年保留；付款截止日期另有用途。"
+      },
+      {
+        "key": "Total",
+        "label": "總金額",
+        "description": "讀取明載的合計、總計或應付總額，保留幣別與小數；勿採用小計、找零或自行加總。"
+      },
+      {
+        "key": "Tax",
+        "label": "稅額",
+        "description": "讀取明列的營業稅額或稅金，保留小數；若只有含稅總額，請留空。"
+      }
+    ]
   },
   {
     "code": "form",
     "label": "表單／表格",
-    "criteria": "需要填寫資料的申請書、問卷，或以欄列呈現的表格文件。",
-    "fields": []
+    "criteria": "供人填寫或按固定欄列登錄資料的表單，例如申請書、登記表、調查表。可見欄名配對的填寫區、勾選框或重複表格列；已填與空白表單皆適用。",
+    "fields": [
+      {
+        "key": "FormTitle",
+        "label": "表單名稱",
+        "description": "讀取頁首的表單名稱，含申請書、登記表等名稱結尾。"
+      },
+      {
+        "key": "FormNumber",
+        "label": "案件／表單編號",
+        "description": "讀取案件編號、申請編號或表單編號欄的值，保留前綴與前導零；忽略版次與頁碼。"
+      },
+      {
+        "key": "Applicant",
+        "label": "申請人／填表人",
+        "description": "讀取申請人或填表人欄已填入的姓名；承辦人與核章人分開。"
+      },
+      {
+        "key": "FormDate",
+        "label": "申請／填表日期",
+        "description": "讀取申請日期或填表日期欄已填入的年月日；空白日期框或表格修訂日期略過。"
+      }
+    ]
   },
   {
     "code": "business_card",
     "label": "名片",
-    "criteria": "印有姓名、公司、職稱及聯絡資料的名片。",
-    "fields": []
+    "criteria": "用來交換個人聯絡資訊的名片。以姓名、公司或職稱，搭配電話、電子郵件或地址的緊湊版面辨認；不以公司標誌單獨判斷。",
+    "fields": [
+      {
+        "key": "Person",
+        "label": "姓名",
+        "description": "讀取名片主人的姓名，若同時印有中英文姓名，依原順序保留。"
+      },
+      {
+        "key": "Company",
+        "label": "公司／機構",
+        "description": "讀取名片所屬公司或機構的完整印字，含可見的分公司名稱。"
+      },
+      {
+        "key": "JobTitle",
+        "label": "職稱",
+        "description": "讀取姓名旁或部門下方印出的職稱，例如經理、工程師；單列部門名稱不當作職稱。"
+      },
+      {
+        "key": "Phone",
+        "label": "聯絡電話",
+        "description": "讀取市話、手機與分機，保留區碼、國碼及分隔符號，多支分行列出；略過傳真。"
+      },
+      {
+        "key": "Email",
+        "label": "電子郵件",
+        "description": "照錄名片上完整的電子郵件地址，保留 @、點號及連字號。"
+      },
+      {
+        "key": "Address",
+        "label": "聯絡地址",
+        "description": "讀取名片印出的郵遞區號與地址，接續跨行門牌、樓層或室號。"
+      }
+    ]
   },
   {
     "code": "document",
     "label": "一般文件",
-    "criteria": "公文、信函、合約、書籍、報告或以段落為主的文件頁面。",
-    "fields": []
+    "criteria": "以標題和連續段落傳達內容的文件，例如公文、信函、合約、報告或書頁。先看文件用途；若主要用途是填寫表格或列示交易，優先使用相應類型。",
+    "fields": [
+      {
+        "key": "Title",
+        "label": "文件標題",
+        "description": "讀取首頁或本頁最明確的文件主標題。公文以主旨作為標題時，讀取主旨內容。"
+      },
+      {
+        "key": "Issuer",
+        "label": "發文／出具單位",
+        "description": "讀取頁首或落款明示的發文機關或出具單位全名，勿取受文者名稱。"
+      },
+      {
+        "key": "Reference",
+        "label": "文件編號",
+        "description": "讀取發文字號、文號或文件編號，保留字母、前導零與符號；勿取頁碼。"
+      },
+      {
+        "key": "Date",
+        "label": "文件日期",
+        "description": "讀取明示的發文、出具或簽署日期；正文提及的事件日期不當作文件日期。"
+      }
+    ]
   },
   {
     "code": "scene_text",
     "label": "標示／畫面文字",
-    "criteria": "招牌、產品標籤、菜單、海報、螢幕截圖或場景中的文字。",
-    "fields": []
+    "criteria": "文字直接出現在招牌、包裝標籤、海報、菜單或操作介面中。若螢幕截圖或照片主要呈現完整證件、收據或文件，依其中的證件或文件類型分類。",
+    "fields": [
+      {
+        "key": "Heading",
+        "label": "主要標題",
+        "description": "讀取標示、海報、商品包裝或畫面中明確的主要標題或品名，依畫面文字照錄。"
+      },
+      {
+        "key": "Notice",
+        "label": "操作／提醒文字",
+        "description": "讀取畫面可見的操作指示、警語或限制條件。若只有按鈕名稱或無相關文字，請留空。"
+      },
+      {
+        "key": "Contact",
+        "label": "聯絡方式",
+        "description": "讀取畫面明列的聯絡電話、電子郵件或網址，保留原文符號，不從 QR Code 猜測。"
+      }
+    ]
   },
   {
     "code": "other",
     "label": "其他影像",
-    "criteria": "不屬於上述類型、類型不明、同時出現多種類型或沒有清晰文字的影像。",
-    "fields": []
+    "criteria": "沒有足夠特徵可歸入其他類型，或多種內容並列且無明確主體。可讀的零星文字仍可擷取；無文字或嚴重模糊的影像也歸入此類。",
+    "fields": [
+      {
+        "key": "Heading",
+        "label": "可見標題",
+        "description": "影像中若有可清楚辨認的標題，照錄其原文；若只有零星字元或沒有標題，請留空。"
+      },
+      {
+        "key": "Reference",
+        "label": "明示編號",
+        "description": "僅擷取有「編號」或「No.」等標籤對應的完整值；沒有明確標籤時留空。"
+      }
+    ]
   }
 ]
