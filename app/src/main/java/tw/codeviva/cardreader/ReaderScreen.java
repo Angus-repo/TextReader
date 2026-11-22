@@ -33,10 +33,13 @@ final class ReaderScreen {
     LinearLayout panel(){LinearLayout v=col();v.setBackground(bg(WHITE,16,true));pad(v,18,16);return v;}
     void line(LinearLayout v){View line=new View(c);line.setBackgroundColor(LINE);v.addView(line,-1,dp(1));}
     Button action(String s,boolean primary,Runnable r){
+        return action(s,primary,v->r.run());
+    }
+    Button action(String s,boolean primary,View.OnClickListener onClick){
         Button b=new Button(c);b.setAllCaps(false);b.setText(s);b.setTextColor(primary?WHITE:GREEN);b.setTextSize(15);
         b.setMinimumWidth(0);b.setMinWidth(0);b.setMinimumHeight(dp(48));b.setMinHeight(dp(48));b.setStateListAnimator(null);
         b.setBackground(new RippleDrawable(ColorStateList.valueOf(0x301e8a73),bg(primary?GREEN:PALE,12,false),null));
-        pad(b,10,7);b.setOnClickListener(v->r.run());return b;
+        pad(b,10,7);b.setOnClickListener(onClick);return b;
     }
     void tile(LinearLayout parent, String title, String state, boolean complete, String description, Runnable open) {
         LinearLayout item = col();

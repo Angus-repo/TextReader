@@ -111,10 +111,56 @@ public class CardReaderTest {
             java.lang.reflect.Method m=MainActivity.class.getDeclaredMethod("detail",int.class);
             m.setAccessible(true);m.invoke(a,0);
             View root=a.findViewById(android.R.id.content);assertNotNull(find(root,"000000012345"));assertNotNull(find(root,"信心 94%"));assertNotNull(find(root,"未讀取"));
-            assertNotNull(find(root,"測試輸出"));
+            assertNotNull(find(root,"已讀取 1 / 5"));
+            assertEquals(View.GONE, find(root,"測試輸出").getVisibility());
+            find(root,"展開").performClick();
+            assertEquals(View.VISIBLE, find(root,"測試輸出").getVisibility());
             a.onBackPressed();assertNotNull(find(root,"1 筆"));
         }
     }
+    @Test public void plainIdOcrAlignsPrintedFieldsAndKeepsExactOriginal() {
+        String raw = "中華民國國民身分證\n樣\n本\n4\n姓名\n林\n以\n安\n出生\n年月日\n民國 80 年 2 月 3 日"
+            + "\n發證日期\n民國 110 年 5 月 6 日(北市)補發\n性別 女\n統一編號\nA000000001";
+        try (ActivityController<MainActivity> ctl = Robolectric.buildActivity(MainActivity.class).setup()) {
+            ReaderScreen ui = new ReaderScreen(ctl.get());
+            LinearLayout root = ui.col();
+            new ResultLayout(ui, root).show(new AzureReader.Reading(catalog.cards.get("id_front"), raw, null));
+            assertNotNull(find(root, "依原文整理"));
+            assertNotNull(find(root, "林以安"));
+            assertNotNull(find(root, "出生年月日"));
+            assertNotNull(find(root, "民國 80 年 2 月 3 日"));
+            assertNotNull(find(root, "民國 110 年 5 月 6 日(北市)補發"));
+            assertNotNull(find(root, "女"));
+            assertNotNull(find(root, "A000000001"));
+            assertNull(find(root, "4"));
+            TextView transcript = (TextView) find(root, raw);
+            assertEquals(View.GONE, transcript.getVisibility());
+            find(root, "展開").performClick();
+            assertEquals(View.VISIBLE, transcript.getVisibility());
+            assertTrue(transcript.isTextSelectable());
+            find(root, "收合").performClick();
+            assertEquals(View.GONE, transcript.getVisibility());
+        }
+    }
+
+    @Test public void textLayoutPreservesUnlabeledProseAndMultilineAddresses() {
+        try (ActivityController<MainActivity> ctl = Robolectric.buildActivity(MainActivity.class).setup()) {
+            ReaderScreen ui = new ReaderScreen(ctl.get());
+            LinearLayout root = ui.col();
+            String prose = "第一段內文。\n\n第二段提及文件編號的用途。";
+            new ResultLayout(ui, root).show(new AzureReader.Reading(catalog.cards.get("document"), prose, null));
+            assertNull(find(root, "展開"));
+            assertEquals(View.VISIBLE, find(root, prose).getVisibility());
+            List<ResultLayout.Row> address = OcrRows.from(catalog.cards.get("id_back"), "住址\n測試市一區\n測試路1號\n00123456");
+            assertEquals(1, address.size());
+            assertEquals("測試市一區測試路1號", address.get(0).value);
+            List<ResultLayout.Row> inline = OcrRows.from(catalog.cards.get("id_back"), "父 林甲　母 林乙\n配偶\n役別");
+            assertEquals(2, inline.size());
+            assertEquals("林甲", inline.get(0).value);
+            assertEquals("林乙", inline.get(1).value);
+        }
+    }
+
     @Test public void captureGivesCameraFullResolutionUri() throws Exception{
         try(ActivityController<MainActivity> ctl=Robolectric.buildActivity(MainActivity.class).setup()){
             Activity a=ctl.get();find(a.findViewById(android.R.id.content),"拍照").performClick();

@@ -269,43 +269,11 @@ public class MainActivity extends Activity {
     private void detail(int index) {
         AzureReader.Reading reading = results.get(index);
         shell("detail", "讀取結果", this::home);
-        heading(content, reading.type.label);
-        ui.gap(content, 16);
-        LinearLayout textPanel = ui.panel();
-        content.addView(textPanel);
-        textPanel.addView(ui.text("辨識全文", 16, GREEN, true));
-        ui.gap(textPanel, 10);
-        if (reading.text.isEmpty()) {
-            note(textPanel, "這張影像未讀到文字。");
-        } else {
-            TextView text = ui.text(reading.text, 17, INK, false);
-            text.setTextIsSelectable(true);
-            textPanel.addView(text);
-        }
-        if (reading.fields != null) displayFields(reading.type, reading.fields);
+        new ResultLayout(ui, content).show(reading);
         ui.gap(content, 16);
         content.addView(ui.action("繼續掃描", true, this::home));
     }
 
-    private void displayFields(CardCatalog.Card card, JSONObject fields) {
-        ui.gap(content, 18);
-        heading(content, "設定欄位");
-        ui.gap(content, 8);
-        int valid=0;LinearLayout list=ui.panel();
-        for(int i=0;i<card.fields.length();i++) {
-            JSONObject def=card.fields.optJSONObject(i);JSONObject f=fields.optJSONObject(def.optString("key"));
-            String value=f==null || f.isNull("valueString")?"":f.optString("valueString","").trim();
-            if(!value.isEmpty())valid++;
-            if(i>0){ui.gap(list,13);ui.line(list);ui.gap(list,13);}
-            LinearLayout row=ui.row();list.addView(row);ui.weight(row,ui.text(def.optString("label"),14,MUTED,false));
-            if(f!=null && !value.isEmpty() && !f.isNull("confidence")){
-                double score=f.optDouble("confidence",-1);if(score>=0&&score<=1)row.addView(ui.text("信心 "+Math.round(score*100)+"%",12,MUTED,false));
-            }
-            ui.gap(list,5);list.addView(ui.text(value.isEmpty()?"未讀取":value,18,value.isEmpty()?MUTED:INK,!value.isEmpty()));
-        }
-        note(content,"已讀取 "+valid+" / "+card.fields.length()+" 欄。請與影像原文核對。");
-        ui.gap(content,14);content.addView(list);
-    }
     private EditText field(LinearLayout box,String title,String value,String hint,boolean secret){
         ui.gap(box,12);TextView label=ui.text(title,14,INK,true);box.addView(label);
         EditText input=new EditText(this);input.setSingleLine(true);input.setTextSize(15);input.setTextColor(INK);

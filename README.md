@@ -2,14 +2,14 @@
 
 TextReader 是一個 Android 影像文字讀取工具。拍照或從相簿選圖後，由 Azure Decisions 判斷影像類型，再由 Azure Content Understanding 讀取全文。結果保留在本次掃描清單，同類型的多筆結果可分別開啟。
 
-**[下載 TextReader 1.2.2 APK](https://github.com/Angus-repo/TextReader/raw/refs/heads/main/apk/TextReader-1.2.2.apk)**。支援 Android 9 以上，沿用 1.0.0「台灣證件讀取」的套件名稱、簽署憑證與連線設定。
+**[下載 TextReader 1.2.3 APK](https://github.com/Angus-repo/TextReader/raw/refs/heads/main/apk/TextReader-1.2.3.apk)**。支援 Android 9 以上，沿用 1.0.0「台灣證件讀取」的套件名稱、簽署憑證與連線設定。
 
 ## 使用方式
 
 1. 在「連線設定」選擇 Microsoft Decision 1.1 或 Azure OpenAI Decisions，填入 Azure 公有雲資源端點、實際部署名稱及金鑰。
 2. 填入 Content Understanding 資源端點與金鑰。全文辨識使用內建 OCR 分析器，可直接開始掃描。
 3. 點「拍照」或「從相簿選取」，預覽後按「開始辨識」。預設會依序完成分類與 OCR。勾選「讀取前讓我確認分類」即可在兩步之間更正類型。
-4. 在結果頁檢視文件類型與全文，長按文字可選取。回首頁可開啟本次其他結果或清除整批資料。
+4. 結果頁優先顯示已擷取的欄位與信心值。只讀全文時，App 會在手機上依可辨識的欄名整理內容，點「辨識原文」旁的「展開」可核對並選取原文。沒有可整理的欄位時，直接顯示全文。回首頁可開啟本次其他結果或清除整批資料。
 
 ## 依描述設定辨識規則
 
