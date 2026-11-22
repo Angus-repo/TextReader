@@ -39,6 +39,10 @@ final class ResultLayout {
         List<Row> rows = new ArrayList<>();
         List<String> missing = new ArrayList<>();
         boolean nhi = reading.type.code.equals("nhi_front");
+        boolean front = reading.type.code.equals("id_front"), back = reading.type.code.equals("id_back");
+        String sexLabel = front ? reading.type.fieldLabel("Sex") : null;
+        String deviceNote = null;
+        boolean usedImage = false;
         List<Row> local = null;
         int cloudValues = 0;
         for (int i = 0; i < reading.type.fields.length(); i++) {
@@ -46,6 +50,7 @@ final class ResultLayout {
             String label = definition.optString("label");
             JSONObject field = reading.fields == null ? null : reading.fields.optJSONObject(definition.optString("key"));
             String value = field == null || field.isNull("valueString") ? "" : ResultText.forDisplay(field.optString("valueString")).trim();
+            if (front && "Sex".equals(definition.optString("key"))) value = IdCardDetails.sexValue(value);
             if (!value.isEmpty()) {
                 rows.add(new Row(label, value, field.optDouble("confidence")));
                 cloudValues++;
@@ -63,7 +68,33 @@ final class ResultLayout {
         }
         if (!nhi && rows.isEmpty()) {
             rows = OcrRows.from(reading.type, displayText);
+            if (front) rows.removeIf(row -> "性別".equals(row.label) || row.label.equals(sexLabel));
             for (Row row : rows) missing.remove(row.label);
+        }
+
+        if (sexLabel != null && uniqueRow(rows, sexLabel) == null) {
+            String sex = IdCardDetails.printedSex(displayText);
+            if (sex.isEmpty()) {
+                sex = IdCardDetails.sexValue(reading.local.optString("Sex"));
+                usedImage = !sex.isEmpty();
+            }
+            if (sex.isEmpty()) {
+                if (!missing.contains(sexLabel)) missing.add(sexLabel);
+            } else {
+                rows.add(new Row(sexLabel, sex, Double.NaN));
+                missing.remove(sexLabel);
+            }
+        }
+        if (back) {
+            String barcode = reading.local.optString("Barcode");
+            if (!barcode.isEmpty()) {
+                rows.add(new Row(IdCardDetails.BARCODE_LABEL, barcode, Double.NaN));
+                usedImage = true;
+            } else if (reading.local.has("Barcode")) {
+                deviceNote = "左下角條碼未能解碼，請讓黑白條紋完整入鏡並對焦後重掃。";
+            } else {
+                deviceNote = "這筆紀錄沒有條碼資料，可重新掃描身分證背面。";
+            }
         }
 
         LinearLayout card = ui.panel();
@@ -74,7 +105,7 @@ final class ResultLayout {
         heading.setAccessibilityHeading(true);
         ui.weight(header, heading);
         if (cloudValues > 0 || nhi) {
-            header.addView(ui.text("已讀取 " + rows.size() + " / " + reading.type.fields.length(), 13, MUTED, false));
+            header.addView(ui.text("已讀取 " + rows.size() + " / " + (reading.type.fields.length() + (back ? 1 : 0)), 13, MUTED, false));
         }
         ui.gap(card, 8);
         if (rows.isEmpty()) {
@@ -82,7 +113,8 @@ final class ResultLayout {
             if (!reading.text.isEmpty() && displayText.trim().isEmpty()) message = "沒有其他可顯示的文字。";
             card.addView(ui.text(message, 14, MUTED, false));
         } else if (rows.size() > cloudValues) {
-            card.addView(ui.text(cloudValues == 0 ? "依原文整理" : "部分欄位依原文整理", 13, MUTED, false));
+            String source = cloudValues == 0 ? "依原文整理" : "部分欄位依原文整理";
+            card.addView(ui.text(usedImage ? "含手機從影像讀取的欄位" : source, 13, MUTED, false));
             ui.gap(card, 6);
         }
         for (Row row : rows) {
@@ -95,6 +127,11 @@ final class ResultLayout {
             card.addView(ui.text("未讀取", 13, MUTED, true));
             ui.gap(card, 4);
             card.addView(ui.text(String.join("、", missing), 14, MUTED, false));
+        }
+        if (deviceNote != null) {
+            ui.line(card);
+            ui.gap(card, 8);
+            card.addView(ui.text(deviceNote, 14, MUTED, false));
         }
         ui.gap(page, 12);
         addTranscript(reading.type.label, displayText, rows);

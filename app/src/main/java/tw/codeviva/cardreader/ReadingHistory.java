@@ -56,6 +56,7 @@ final class ReadingHistory extends SQLiteOpenHelper {
         JSONObject record = obj("id", id, "createdAt", now, "type", obj("code", type.code, "label", type.label,
             "criteria", type.criteria, "fields", type.fields), "text", reading.text);
         if (reading.fields != null) record.put("fields", reading.fields);
+        if (reading.local.length() > 0) record.put("local", reading.local);
         insert(getWritableDatabase(), id, now, type.label, record);
         return id;
     }
@@ -88,7 +89,8 @@ final class ReadingHistory extends SQLiteOpenHelper {
             field.getString("key");
             field.getString("label");
         }
-        return new AzureReader.Reading(type, item.getString("text"), item.has("fields") ? item.getJSONObject("fields") : null);
+        return new AzureReader.Reading(type, item.getString("text"), item.has("fields") ? item.getJSONObject("fields") : null,
+                item.has("local") ? item.getJSONObject("local") : new JSONObject(), 0);
     }
     void clear() {
         getWritableDatabase().delete("readings", null, null);

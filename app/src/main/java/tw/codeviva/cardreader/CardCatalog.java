@@ -32,6 +32,14 @@ final class CardCatalog {
             return fields.length() > 0;
         }
 
+        String fieldLabel(String key) {
+            for (int i = 0; i < fields.length(); i++) {
+                JSONObject field = fields.optJSONObject(i);
+                if (key.equals(field.optString("key"))) return field.optString("label");
+            }
+            return null;
+        }
+
         String textAnalyzer() {
             return code.equals("receipt") || code.equals("form") ? "prebuilt-layout" : "prebuilt-read";
         }

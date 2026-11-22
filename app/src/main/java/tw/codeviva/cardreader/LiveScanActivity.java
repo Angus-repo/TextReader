@@ -20,6 +20,9 @@ import java.util.concurrent.Executors;
 
 @SuppressWarnings("deprecation")
 public final class LiveScanActivity extends Activity implements TextureView.SurfaceTextureListener {
+    static final int COVERAGE_PERCENT = 70;
+    static final float MIN_COVERAGE = COVERAGE_PERCENT / 100f;
+    static boolean coversEnough(float coverage) { return coverage >= MIN_COVERAGE; }
     static final String REVIEW_CROP = "review_crop";
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -80,13 +83,18 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
             if (r-l != or-ol || b-t != ob-ot) layoutWindow();
         });
         LinearLayout footer = ui.col();
-        ui.pad(footer, 18, 16);
+        ui.pad(footer, 14, 10);
         root.addView(footer);
-        hint = ui.text("請將文件四角放入取景框", 19, ReaderScreen.INK, true);
+        hint = ui.text("請將文件四角放入取景框", 26, 0xff302511, true);
+        hint.setTypeface(Typeface.DEFAULT_BOLD);
+        hint.setGravity(Gravity.CENTER);
+        hint.setBackground(ui.bg(0xffffdf91, 14, false));
+        hint.setMinimumHeight(ui.dp(60));
+        ui.pad(hint, 12, 10);
         hint.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         footer.addView(hint);
         ui.gap(footer, 6);
-        footer.addView(ui.text("占取景框 80% 以上、文字清晰且穩定時，自動裁切並送往 Azure 辨識。", 14, ReaderScreen.MUTED, false));
+        footer.addView(ui.text("占取景框 " + COVERAGE_PERCENT + "% 以上、文字清晰且穩定時，自動裁切並送往 Azure 辨識。", 16, ReaderScreen.MUTED, false));
         reviewCrop = new CheckBox(this);
         reviewCrop.setText("送出前先預覽裁切影像");
         reviewCrop.setChecked(saved != null && saved.getBoolean(REVIEW_CROP));
@@ -284,7 +292,7 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
                 report(token, doc, "請移遠一點，讓四角與框邊留有空隙", false, null);
                 return;
             }
-            if (doc.coverage < .80f) {
+            if (!coversEnough(doc.coverage)) {
                 report(token, doc, "請靠近一點，目前文件占 " + (int) (doc.coverage * 100f) + "%", false, null);
                 return;
             }
@@ -347,8 +355,8 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
             pen.setStrokeWidth(2 * density);
             pen.setColor(0xccffffff);
             c.drawRect(1, 1, w-1, h-1, pen);
-            // A similar rectangle scaled by sqrt(.80) occupies 80% of the area.
-            float inset = (1f - (float) Math.sqrt(.80)) / 2;
+            // Scale the side lengths so the guide encloses the capture threshold area.
+            float inset = (1f - (float) Math.sqrt(MIN_COVERAGE)) / 2;
             float guide = 12 * density;
             pen.setColor(0xcce2f0e6);
             for (int sideX = 0; sideX < 2; sideX++) for (int sideY = 0; sideY < 2; sideY++) {
@@ -361,7 +369,7 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
             path.moveTo(frame.corners[0] * w, frame.corners[1] * h);
             for (int i = 2; i < 8; i += 2) path.lineTo(frame.corners[i] * w, frame.corners[i+1] * h);
             path.close();
-            pen.setColor(!frame.clipped && frame.coverage >= .8f ? 0xff88f1bc : 0xffffc96b);
+            pen.setColor(!frame.clipped && frame.coverage <= .955f && coversEnough(frame.coverage) ? 0xff88f1bc : 0xffffc96b);
             c.drawPath(path, pen);
         }
     }

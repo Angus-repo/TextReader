@@ -43,6 +43,10 @@ final class RuleEditor {
         body.setFocusableInTouchMode(true);
         body.addView(ui.text(ResultText.RULE, 14, MUTED, false));
         ui.gap(body, 12);
+        if ("id_back".equals(code)) {
+            body.addView(ui.text("手機會解碼卡背左下角的一維條碼，與右下角印出的證件流水號分開顯示。", 14, MUTED, false));
+            ui.gap(body, 12);
+        }
         if (card == null) {
             body.addView(ui.action("帶入內建範例", false, this::chooseTemplate));
             ui.gap(body, 12);

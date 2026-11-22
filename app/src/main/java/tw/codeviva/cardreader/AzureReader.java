@@ -216,8 +216,15 @@ final class AzureReader {
         final CardCatalog.Card type;
         final String text;
         final JSONObject fields;
+        final JSONObject local;
+        final double pageAngle;
 
         Reading(CardCatalog.Card type, String text, JSONObject fields) {
+            this(type, text, fields, new JSONObject(), 0);
+        }
+        Reading(CardCatalog.Card type, String text, JSONObject fields, JSONObject local, double pageAngle) {
+            this.pageAngle = pageAngle;
+            this.local = local;
             this.type = type;
             this.text = text;
             this.fields = fields;
@@ -249,7 +256,11 @@ final class AzureReader {
             if (!block.isEmpty()) blocks.add(block);
         }
         JSONObject fields = structured ? contents.getJSONObject(0).optJSONObject("fields") : null;
-        return new Reading(type, String.join("\n\n", blocks), structured && fields == null ? new JSONObject() : fields);
+        JSONArray pages = contents.getJSONObject(0).optJSONArray("pages");
+        JSONObject page = pages == null ? null : pages.optJSONObject(0);
+        double angle = page == null ? 0 : page.optDouble("angle", 0);
+        return new Reading(type, String.join("\n\n", blocks), structured && fields == null ? new JSONObject() : fields,
+                new JSONObject(), angle);
     }
 
     private static String contentText(JSONObject content) {

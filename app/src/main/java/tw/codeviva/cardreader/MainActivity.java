@@ -352,6 +352,8 @@ public class MainActivity extends Activity {
                 }
             }));
             if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
+            IdCardDetails.readImage(this, reading, bytes);
+            if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
             try {
                 history.add(reading);
             } catch (android.database.SQLException e) {
