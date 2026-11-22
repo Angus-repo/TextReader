@@ -18,9 +18,15 @@ enum ExtractionMode {
         this.referenceRate = new BigDecimal(rate);
     }
 
-    static ExtractionMode forRule(String value, String code) {
+    static ExtractionMode fromLabel(String value) {
         for (ExtractionMode mode : values())
             if (mode.label.equalsIgnoreCase(value)) return mode;
+        return null;
+    }
+
+    static ExtractionMode forRule(String value, String code) {
+        ExtractionMode mode = fromLabel(value);
+        if (mode != null) return mode;
         return "receipt".equals(code) || "form".equals(code) ? STANDARD : BASIC;
     }
 

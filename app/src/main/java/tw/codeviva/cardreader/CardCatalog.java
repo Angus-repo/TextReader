@@ -32,6 +32,20 @@ final class CardCatalog {
             autoFields = json.optBoolean("autoFields") && hasFields();
         }
 
+        private Card(Card rule, ExtractionMode mode) {
+            code = rule.code;
+            label = rule.label;
+            criteria = rule.criteria;
+            fields = rule.fields;
+            autoFields = rule.autoFields;
+            extraction = mode;
+            explicitExtraction = true;
+        }
+
+        Card forScan(ExtractionMode override) {
+            return override == null ? this : new Card(this, override);
+        }
+
         boolean hasFields() {
             return fields.length() > 0;
         }

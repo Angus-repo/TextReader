@@ -15,6 +15,7 @@ import javax.crypto.spec.GCMParameterSpec;
 final class Config {
     static final String MS = "/providers/microsoft/v1/systemone", OA = "/openai/v1/decisions";
     boolean openAI;
+    ExtractionMode extractionOverride; // null follows the individual document rules.
     JSONObject pageRates = new JSONObject();
     String decisionRate = "", completionInput = "", completionOutput = "", completionCached = "";
     String decisionRoot="", cuRoot="", model="Microsoft-Decision-1.1", cuModel="gpt-5.2", decisionKey="", cuKey="";
@@ -30,11 +31,14 @@ final class Config {
             return "https://" + host;
         } catch (Exception e) { throw new IllegalArgumentException("請填 Azure 公有雲 HTTPS 資源端點，例如 https://資源名稱.services.ai.azure.com。"); }
     }
+    static boolean validRate(String rate) {
+        return rate.isEmpty() || rate.matches("(?:0|[1-9][0-9]{0,5})(?:\\.[0-9]{1,9})?");
+    }
     void validate() {
         java.util.List<String> rates = new java.util.ArrayList<>(java.util.Arrays.asList(decisionRate, completionInput, completionOutput, completionCached));
         for (ExtractionMode mode : ExtractionMode.values()) rates.add(pageRates.optString(mode.label));
         for (String rate : rates) {
-            if (!rate.isEmpty() && !rate.matches("(?:0|[1-9][0-9]{0,5})(?:\\.[0-9]{1,9})?"))
+            if (!validRate(rate))
                 throw new IllegalArgumentException("單價請輸入非負美元數字，例如 0.042；留空可使用參考價。");
         }
         decisionRoot = endpoint(decisionRoot,openAI?OA:MS);
@@ -56,11 +60,15 @@ final class Config {
     static void forget(Context c) {
         c.getSharedPreferences("connection",0).edit().clear().apply();
     }
+    JSONObject toJson() throws org.json.JSONException {
+        return CardCatalog.obj("openAI",openAI,"decisionRoot",decisionRoot,"cuRoot",cuRoot,"model",model,
+            "extractionOverride",extractionOverride == null ? null : extractionOverride.label,
+            "pageRates",pageRates,"decisionRate",decisionRate,"completionInput",completionInput,"completionOutput",completionOutput,"completionCached",completionCached,
+            "cuModel",cuModel,"decisionKey",decisionKey,"cuKey",cuKey);
+    }
     void save(Context c) throws Exception {
         validate();
-        byte[] plain=CardCatalog.obj("openAI",openAI,"decisionRoot",decisionRoot,"cuRoot",cuRoot,"model",model,
-            "pageRates",pageRates,"decisionRate",decisionRate,"completionInput",completionInput,"completionOutput",completionOutput,"completionCached",completionCached,
-            "cuModel",cuModel,"decisionKey",decisionKey,"cuKey",cuKey).toString().getBytes(StandardCharsets.UTF_8);
+        byte[] plain=toJson().toString().getBytes(StandardCharsets.UTF_8);
         Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");
         cipher.init(Cipher.ENCRYPT_MODE,key());
         String payload=Base64.encodeToString(cipher.doFinal(plain),Base64.NO_WRAP);
@@ -69,15 +77,19 @@ final class Config {
             throw new java.io.IOException("無法儲存連線設定。");
     }
     static Config load(Context c) throws Exception {
-        Config cfg=new Config();
         SharedPreferences p=c.getSharedPreferences("connection",0);
-        if (!p.contains("data")) return cfg;
+        if (!p.contains("data")) return new Config();
         Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");
         cipher.init(Cipher.DECRYPT_MODE,key(),new GCMParameterSpec(128,Base64.decode(p.getString("iv",""),0)));
         JSONObject j=new JSONObject(new String(cipher.doFinal(Base64.decode(p.getString("data",""),0)),StandardCharsets.UTF_8));
+        return fromJson(j);
+    }
+    static Config fromJson(JSONObject j) throws org.json.JSONException {
+        Config cfg=new Config();
         cfg.openAI=j.getBoolean("openAI"); cfg.decisionRoot=j.getString("decisionRoot"); cfg.cuRoot=j.getString("cuRoot");
         cfg.model=j.getString("model"); cfg.cuModel=j.getString("cuModel");
         cfg.decisionKey=j.getString("decisionKey"); cfg.cuKey=j.getString("cuKey");
+        cfg.extractionOverride = ExtractionMode.fromLabel(j.optString("extractionOverride"));
         if (j.optJSONObject("pageRates") != null) cfg.pageRates = j.getJSONObject("pageRates");
         cfg.decisionRate=j.optString("decisionRate"); cfg.completionInput=j.optString("completionInput");
         cfg.completionOutput=j.optString("completionOutput"); cfg.completionCached=j.optString("completionCached");

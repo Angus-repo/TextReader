@@ -96,7 +96,7 @@ public class CardReaderTest {
         config.pageRates.put("Basic", "3");
         JSONObject snapshot = usage.snapshot();
         String display = visibleText(new UsagePanel(new ReaderScreen(RuntimeEnvironment.getApplication())).show(snapshot));
-        assertTrue(display.contains("規則選用 Standard"));
+        assertTrue(display.contains("本次選用 Standard"));
         assertTrue(display.contains("Azure 回報 Basic 2 頁 · US$0.0016"));
         assertTrue(display.contains("Azure 回報 Standard 同步 1 頁 · US$0.0075"));
         assertTrue(display.contains("Azure 回報 Minimal 1 頁 · US$0.00001"));
@@ -127,6 +127,51 @@ public class CardReaderTest {
             ((View) find(root, label).getParent().getParent()).performClick();
             selector = root.findViewById(find(root, "內容擷取強度").getLabelFor());
             assertEquals(ExtractionMode.MINIMAL, selector.getSelectedItem());
+        }
+    }
+
+    @Test public void connectionModeRoundTripsWithoutChangingTheUnderlyingRule() throws Exception {
+        config.decisionKey = config.cuKey = "test";
+        CardCatalog.Card rule = catalog.cards.get("receipt");
+        for (ExtractionMode mode : ExtractionMode.values()) {
+            config.extractionOverride = mode;
+            config = tw.codeviva.cardreader.Config.fromJson(config.toJson());
+            CardCatalog.Card scan = rule.forScan(config.extractionOverride);
+            assertEquals(mode, scan.extraction);
+            assertEquals(mode.analyzer, scan.textAnalyzer());
+            assertEquals(mode == ExtractionMode.STANDARD,
+                    scan.schema(config.cuModel).getJSONObject("config").getBoolean("enableLayout"));
+            assertSame(rule.fields, scan.fields);
+        }
+        config.extractionOverride = null;
+        assertFalse(config.toJson().has("extractionOverride"));
+        assertSame(rule, rule.forScan(tw.codeviva.cardreader.Config.fromJson(config.toJson()).extractionOverride));
+        assertEquals(ExtractionMode.STANDARD, rule.extraction);
+        assertFalse(rule.explicitExtraction);
+    }
+
+    @Test public void connectionDropdownShowsSavedStrengthAndRespondsToRateEdits() throws Exception {
+        config.extractionOverride = ExtractionMode.STANDARD;
+        try (ActivityController<MainActivity> controller = Robolectric.buildActivity(MainActivity.class).setup()) {
+            MainActivity activity = controller.get();
+            setField(activity, "config", config);
+            View root = activity.findViewById(android.R.id.content);
+            find(root, "連線設定").performClick();
+            Spinner spinner = root.findViewById(find(root, "內容讀取強度").getLabelFor());
+            assertTrue(spinner.isShown());
+            assertEquals(4, spinner.getCount());
+            assertEquals(ExtractionMode.STANDARD, spinner.getSelectedItem());
+            assertNotNull(find(root, "套用至所有文件。非同步擷取每頁 US$0.005。"));
+            spinner.setSelection(1);
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+            find(root, "估算費用單價（選填）").performClick();
+            TextView priceLabel = (TextView)find(root, "Minimal（每 1,000 頁）");
+            LinearLayout container = (LinearLayout)priceLabel.getParent();
+            ((EditText)container.getChildAt(container.indexOfChild(priceLabel) + 1)).setText("0.02");
+            assertNotNull(find(root, "套用至所有文件。非同步擷取每頁 US$0.00002。"));
+            spinner.setSelection(0);
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+            assertNotNull(find(root, "各文件使用自己的辨識規則。"));
         }
     }
 
@@ -1163,6 +1208,8 @@ public class CardReaderTest {
 
     @Test public void scanButtonClassifiesBeforeOcrAndCanPauseForReview() throws Exception {
         for (boolean reviewFirst : new boolean[]{false, true}) {
+            config.extractionOverride = reviewFirst ? ExtractionMode.BASIC : null;
+            ExtractionMode expectedMode = reviewFirst ? ExtractionMode.BASIC : ExtractionMode.STANDARD;
             try (ActivityController<OfflineActivity> controller = Robolectric.buildActivity(OfflineActivity.class).setup()) {
                 OfflineActivity activity = controller.get();
                 List<String> calls = Collections.synchronizedList(new ArrayList<>());
@@ -1171,9 +1218,9 @@ public class CardReaderTest {
                         calls.add("classify");
                         return reply(200,null,obj("usage",obj("input_tokens",1000,"output_tokens",0),"answers",obj(AzureReader.QUESTION,obj("type","choice","choice","receipt"))));
                     }
-                    if (!url.contains("prebuilt-layout:analyze")) throw new IOException("Wrong analyzer");
+                    if (!url.contains(expectedMode.analyzer + ":analyze")) throw new IOException("Wrong analyzer");
                     calls.add("read");
-                    return reply(200,null,obj("usage",obj("documentPagesStandard",1),"result",obj("contents",new JSONArray().put(obj("markdown","合計 365")))));
+                    return reply(200,null,obj("usage",obj(expectedMode.meter(),1),"result",obj("contents",new JSONArray().put(obj("markdown","合計 365")))));
                 }, ms -> {});
                 android.graphics.Bitmap bitmap = android.graphics.Bitmap.createBitmap(4,4,android.graphics.Bitmap.Config.ARGB_8888);
                 setField(activity, "config", config);
@@ -1200,7 +1247,7 @@ public class CardReaderTest {
                     ReadingHistory.Entry entry = db.list().get(0);
                     JSONObject usage = db.get(entry.id).usage;
                     assertEquals(1000, usage.getLong("tokens"));
-                    assertEquals("0.005042", usage.getString("usd"));
+                    assertEquals(reviewFirst ? "0.001042" : "0.005042", usage.getString("usd"));
                     assertTrue(usage.getLong("apiElapsedMs") < 600000);
                     activity.onBackPressed();
                     assertNotNull(find(root, entry.usageSummary));

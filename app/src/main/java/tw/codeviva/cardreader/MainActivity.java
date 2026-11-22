@@ -357,7 +357,7 @@ public class MainActivity extends Activity {
     }
 
     private void readText() {
-        CardCatalog.Card type = catalog.cards.get(selected);
+        CardCatalog.Card type = catalog.cards.get(selected).forScan(config.extractionOverride);
         AzureReader api = createReader();
         byte[] bytes = photo.jpeg;
         api.usage = photo.usage;
@@ -427,6 +427,8 @@ public class MainActivity extends Activity {
         note(content, ResultText.RULE);
         ui.gap(content, 8);
         note(content, "選擇一個類型，編輯分類特徵與要讀取的欄位。");
+        if (config.extractionOverride != null)
+            note(content, "目前所有文件統一使用 " + config.extractionOverride.label + "。在連線設定選擇「依辨識規則」即可使用以下各類型的強度。");
         ui.gap(content, 12);
         content.addView(ui.action("新增自訂類型", false, () -> editRule(null)));
         ui.gap(content, 12);
@@ -465,7 +467,7 @@ public class MainActivity extends Activity {
             }
         });
         ui.gap(content,12);LinearLayout cu=ui.panel();content.addView(cu);heading(cu,"Content Understanding");
-        ui.gap(cu,6);note(cu,"全文依辨識規則使用 Digital Parse、Read 或 Layout 分析器。若啟用自訂欄位，才需另設擷取模型與 text-embedding-3-large 的部署對應，並允許建立分析器。");
+        ui.gap(cu,6);note(cu,"全文依選定的讀取強度使用 Digital Parse、Read 或 Layout 分析器。若啟用自訂欄位，才需另設擷取模型與 text-embedding-3-large 的部署對應，並允許建立分析器。");
         EditText ce=field(cu,"Content Understanding 資源端點",config.cuRoot,"https://資源名稱.services.ai.azure.com",false);
         EditText ck=field(cu,"Content Understanding API 金鑰",config.cuKey,"同一資源可填相同金鑰",true);
         EditText cm=field(cu,"自訂欄位用文字生成模型（completion）",config.cuModel,"例如 gpt-5.2",false);
@@ -473,6 +475,22 @@ public class MainActivity extends Activity {
         ui.gap(content,12);
         LinearLayout rates = ui.panel();
         content.addView(rates);
+        TextView strengthLabel = ui.text("內容讀取強度", 18, INK, true);
+        rates.addView(strengthLabel);
+        Spinner strength = new Spinner(this, Spinner.MODE_DROPDOWN);
+        strength.setId(View.generateViewId());
+        strengthLabel.setLabelFor(strength.getId());
+        List<Object> choices = new ArrayList<>();
+        choices.add("依辨識規則");
+        Collections.addAll(choices, ExtractionMode.values());
+        ArrayAdapter<Object> strengths = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, choices);
+        strengths.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        strength.setAdapter(strengths);
+        strength.setSelection(config.extractionOverride == null ? 0 : choices.indexOf(config.extractionOverride));
+        rates.addView(strength, -1, ui.dp(48));
+        TextView strengthNote = ui.text("", 14, MUTED, false);
+        rates.addView(strengthNote);
+        ui.gap(rates, 12);
         LinearLayout prices = ui.col();
         rates.addView(ui.action("估算費用單價（選填）", false, () -> prices.setVisibility(prices.getVisibility() == View.GONE ? View.VISIBLE : View.GONE)));
         rates.addView(prices);
@@ -490,11 +508,42 @@ public class MainActivity extends Activity {
             price.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
             pagePrices.put(mode, price);
         }
+        Runnable updateStrengthNote = () -> {
+            Object selectedStrength = strength.getSelectedItem();
+            if (!(selectedStrength instanceof ExtractionMode)) {
+                strengthNote.setText("各文件使用自己的辨識規則。");
+                return;
+            }
+            ExtractionMode mode = (ExtractionMode) selectedStrength;
+            String raw = pagePrices.get(mode).getText().toString().trim();
+            if (!Config.validRate(raw)) {
+                strengthNote.setText("請檢查 " + mode.label + " 的每 1,000 頁單價。");
+                return;
+            }
+            java.math.BigDecimal rate = raw.isEmpty() ? mode.referenceRate : new java.math.BigDecimal(raw);
+            strengthNote.setText("套用至所有文件。非同步擷取每頁 US$"
+                    + rate.movePointLeft(3).stripTrailingZeros().toPlainString() + "。");
+        };
+        strength.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            public void onNothingSelected(AdapterView<?> parent) {}
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                updateStrengthNote.run();
+            }
+        });
+        android.text.TextWatcher refreshRate = new android.text.TextWatcher() {
+            public void beforeTextChanged(CharSequence text, int start, int count, int after) {}
+            public void onTextChanged(CharSequence text, int start, int before, int count) { updateStrengthNote.run(); }
+            public void afterTextChanged(android.text.Editable text) {}
+        };
+        for (EditText price : pagePrices.values()) price.addTextChangedListener(refreshRate);
+        updateStrengthNote.run();
         for (EditText price : new EditText[]{decisionPrice, completionIn, completionOut, completionCache})
             price.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
         ui.gap(content,12);TextView msg=ui.text("",14,0xff863b24,false);msg.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);content.addView(msg);
         ui.gap(content,4);content.addView(ui.action("儲存連線設定",true,()->{
             Config c=new Config();c.openAI=provider.getSelectedItemPosition()==1;
+            Object selectedStrength = strength.getSelectedItem();
+            c.extractionOverride = selectedStrength instanceof ExtractionMode ? (ExtractionMode) selectedStrength : null;
             c.model=dep.getText().toString().trim();c.decisionRoot=de.getText().toString().trim();c.decisionKey=dk.getText().toString().trim();
             c.cuRoot=ce.getText().toString().trim();c.cuKey=ck.getText().toString().trim();c.cuModel=cm.getText().toString().trim();
             c.decisionRate=decisionPrice.getText().toString().trim(); c.completionInput=completionIn.getText().toString().trim();

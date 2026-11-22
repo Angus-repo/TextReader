@@ -2,7 +2,7 @@
 
 TextReader 是一個 Android 影像文字讀取工具。即時裁切文件或從相簿選圖後，由 Azure Decisions 判斷影像類型，再由 Azure Content Understanding 讀取全文。結果自動儲存在手機的「辨識紀錄」，同類型的多筆結果可分別開啟。
 
-目前版本為 **TextReader 1.7.0**。先前的 [1.6.3 APK](https://github.com/Angus-repo/TextReader/raw/refs/heads/main/apk/TextReader-1.6.3.apk) 可從主分支下載。支援 Android 9 以上，沿用 1.0.0「台灣證件讀取」的套件名稱、簽署憑證與連線設定。
+目前版本為 **TextReader 1.7.1**。先前的 [1.6.3 APK](https://github.com/Angus-repo/TextReader/raw/refs/heads/main/apk/TextReader-1.6.3.apk) 可從主分支下載。支援 Android 9 以上，沿用 1.0.0「台灣證件讀取」的套件名稱、簽署憑證與連線設定。
 
 ## 使用方式
 
@@ -45,6 +45,8 @@ TextReader 是一個 Android 影像文字讀取工具。即時裁切文件或從
 | Basic 全文 | 將照片送至 prebuilt-read |
 | Standard 全文 | 將照片送至 prebuilt-layout |
 | 全文及已設定的欄位 | 使用該類型的自訂分析器，一次讀取全文與欄位；未設定欄位的類型只讀全文 |
+
+在「連線設定 → 內容讀取強度」下拉選單選擇 Minimal、Basic 或 Standard，按「儲存連線設定」後，所有文件的全文與欄位都使用所選強度。選回「依辨識規則」即恢復各文件原有的設定。
 
 從「辨識規則 → 文件類型 → 內容擷取強度」選擇模式後按「儲存辨識規則」。儲存後同一強度同時適用全文與自訂欄位。既有規則在首次儲存前沿用原分析器。未指定強度時，收據與表單全文使用 Standard，其他類型全文使用 Basic。Minimal 模式下，Azure 欄位模型只收到手機 OCR 的純文字，無法看到原圖、格線或印章。手機 OCR 無文字或模型未就緒時會提示重試。
 

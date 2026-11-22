@@ -81,7 +81,9 @@ final class RuleEditor {
             }
         });
         section.addView(ui.text("Minimal 先由手機辨識，再將純文字送往 Azure，不含原圖版面。分類與自訂欄位另計費。", 13, MUTED, false));
-        if (card != null && !card.explicitExtraction)
+        if (config.extractionOverride != null)
+            section.addView(ui.text("連線設定目前統一使用 " + config.extractionOverride.label + "。選回「依辨識規則」後會使用此處的強度。", 13, MUTED, false));
+        else if (card != null && !card.explicitExtraction)
             section.addView(ui.text("儲存後，全文與自訂欄位都會套用所選強度。", 13, MUTED, false));
         ui.gap(body, 18);
         body.addView(ui.text("擷取欄位", 19, INK, true));

@@ -106,7 +106,7 @@ final class UsagePanel {
 
     private void pageDetails(LinearLayout group, JSONObject op) {
         ui.gap(group, 8);
-        group.addView(ui.text("內容擷取 · 規則選用 " + op.optString("requestedMode"), 14, GREEN, true));
+        group.addView(ui.text("內容擷取 · 本次選用 " + op.optString("requestedMode"), 14, GREEN, true));
         JSONArray charges = op.optJSONArray("pageCharges");
         if (charges == null) {
             group.addView(ui.text("Azure 未回報計費頁數，擷取費用待確認。", 13, MUTED, false));
