@@ -36,7 +36,7 @@ public class CardReaderTest {
                 assertEquals("data:image/png;base64,AQID",req.getJSONArray("input").getJSONObject(0)
                     .getJSONArray("content").getJSONObject(1).getString("image_url"));
             }else{
-                assertEquals("AQID",req.getJSONObject("assets").getJSONObject("card.png").getString("data_base64"));
+                assertEquals("AQID",req.getJSONObject("assets").getJSONObject("card.jpg").getString("data_base64"));
                 assertEquals(11,req.getJSONObject("questions").getJSONObject(AzureReader.QUESTION).getJSONObject("criteria").length());
             }
             for(String typ:catalog.cards.keySet()){
@@ -239,6 +239,90 @@ public class CardReaderTest {
                 assertEquals(Arrays.asList("classify","read"), calls);
                 assertNotNull(find(root, "收據／發票"));
             }
+        }
+    }
+
+    @Test public void failedClassificationRetainsPhotoAndAllowsManualBackSideOcr() throws Exception {
+        config.cuModel = "text-embedding-3-large";
+        config.decisionKey = "private-test-credential";
+        try (ActivityController<OfflineActivity> controller = Robolectric.buildActivity(OfflineActivity.class).setup()) {
+            OfflineActivity activity = controller.get();
+            List<String> calls = Collections.synchronizedList(new ArrayList<>());
+            activity.reader = new AzureReader(catalog, config, (method, url, header, key, body) -> {
+                if (url.endsWith(tw.codeviva.cardreader.Config.MS)) {
+                    calls.add("classify");
+                    return new AzureReader.Reply(400, null, 0, obj("detail", new JSONArray().put(
+                        obj("msg", "Unsupported image", "input", key))), "request-123");
+                }
+                calls.add("ocr");
+                assertTrue(url.contains("/prebuilt-read:analyze"));
+                assertEquals("AQID", body.getJSONArray("inputs").getJSONObject(0).getString("data"));
+                return reply(200, null, obj("result", obj("contents", new JSONArray().put(obj("markdown", "測試背面文字")))));
+            }, ms -> {});
+            android.graphics.Bitmap bitmap = android.graphics.Bitmap.createBitmap(256, 164, android.graphics.Bitmap.Config.ARGB_8888);
+            setField(activity, "config", config);
+            setField(activity, "photo", new CardPhoto(bitmap, new byte[]{1,2,3}));
+            java.lang.reflect.Method preview = MainActivity.class.getDeclaredMethod("preview");
+            preview.setAccessible(true);
+            preview.invoke(activity);
+            View root = activity.findViewById(android.R.id.content);
+            find(root, "開始辨識").performClick();
+            awaitText(root, "手動選擇類型");
+            assertNotNull(find(root, "Decisions 影像分類失敗（HTTP 400）\nUnsupported image\n請求 ID：request-123\n可重新分類，或手動選擇這張影像的類型。"));
+            assertNotNull(find(root, "重新分類"));
+            find(root, "手動選擇類型").performClick();
+            android.app.AlertDialog dialog = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+            ListView list = dialog.getListView();
+            int back = new ArrayList<>(catalog.cards.keySet()).indexOf("id_back");
+            list.performItemClick(null, back, list.getAdapter().getItemId(back));
+            assertEquals(Collections.singletonList("classify"), calls);
+            assertNotNull(find(root, "已手動選擇類型，可直接讀取這張影像。"));
+            find(root, "讀取文字").performClick();
+            awaitText(root, "測試背面文字");
+            assertNotNull(find(root, "身分證反面"));
+            assertEquals(Arrays.asList("classify", "ocr"), calls);
+        }
+    }
+
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    public void microsoftDecisionSendsDecodableJpegWithinImageBounds() throws Exception {
+        for (int[] size : new int[][]{{160, 100}, {960, 615}, {960, 960}, {16, 950}, {920, 14}}) {
+            android.graphics.Bitmap original = android.graphics.Bitmap.createBitmap(size[0], size[1],
+                android.graphics.Bitmap.Config.ARGB_8888);
+            original.eraseColor(android.graphics.Color.BLUE);
+            AzureReader reader = new AzureReader(catalog, config, (method, url, header, key, body) -> {
+                JSONObject asset = body.getJSONObject("assets").getJSONObject("card.jpg");
+                assertTrue(body.getString("state").contains("image:card.jpg"));
+                assertEquals("jpeg", asset.getString("format"));
+                byte[] bytes = android.util.Base64.decode(asset.getString("data_base64"), android.util.Base64.DEFAULT);
+                android.graphics.Bitmap decoded = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                assertNotNull(decoded);
+                int w = decoded.getWidth(), h = decoded.getHeight();
+                assertTrue(w >= 280 && h >= 280 && w <= 1568 && h <= 1568);
+                assertTrue((long) w*h <= 645120);
+                assertTrue(android.graphics.Color.blue(decoded.getPixel(w/2,h/2)) > 230);
+                if (size[0] == 16) assertTrue(android.graphics.Color.red(decoded.getPixel(0,h/2)) > 230);
+                assertEquals(0xff, bytes[0] & 255);
+                assertEquals(0xd8, bytes[1] & 255);
+                return reply(200, null, obj("answers",obj(AzureReader.QUESTION,obj("type","choice","choice","id_back"))));
+            }, ms -> {});
+            assertEquals("id_back", reader.classify(original));
+            assertFalse(original.isRecycled());
+            original.recycle();
+        }
+    }
+
+    @Test public void embeddingModelGivesActionableErrorOnlyForFieldExtraction() throws Exception {
+        config.cuModel = "text-embedding-3-large";
+        AzureReader reader = new AzureReader(catalog, config, (method, url, header, key, body) -> {
+            throw new AssertionError("An embedding model is not a completion model");
+        }, ms -> {});
+        try {
+            reader.read(catalog.cards.get("id_back"), new byte[]{1}, true, msg -> {});
+            fail();
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage().contains("只讀全文"));
+            assertTrue(expected.getMessage().contains("文字生成模型"));
         }
     }
 

@@ -8,6 +8,7 @@ import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Locale;
+import java.util.LinkedHashSet;
 import javax.net.ssl.HttpsURLConnection;
 import static tw.codeviva.cardreader.CardCatalog.obj;
 
@@ -23,13 +24,47 @@ final class AzureReader {
     interface Transport { Reply call(String method,String url,String header,String key,JSONObject data) throws Exception; }
     static final class Reply {
         final int code; final String location; final int seconds; final JSONObject body;
+        final String requestId;
         Reply(int code,String location,int seconds,JSONObject body) {
+            this(code, location, seconds, body, null);
+        }
+        Reply(int code, String location, int seconds, JSONObject body, String requestId) {
+            this.requestId = requestId;
             this.code=code;this.location=location;this.seconds=seconds;this.body=body;
         }
         void check(String stage) throws IOException {
             if(code<200 || code>=300) throw new IOException(stage+"（HTTP "+code+"）"+errorCode(body)+"\n"+hint(code));
         }
     }
+    private static void collectErrorDetails(Object item, LinkedHashSet<String> parts, int depth) {
+        if (parts.size() >= 5 || depth > 5) return;
+        if (item instanceof String) {
+            String value = ((String) item).trim();
+            if (!value.isEmpty()) parts.add(value);
+        } else if (item instanceof JSONArray) {
+            collectErrorDetails(((JSONArray) item).opt(0), parts, depth + 1);
+        } else if (item instanceof JSONObject) {
+            JSONObject object = (JSONObject) item;
+            for (String name : new String[]{"error", "code", "message", "msg", "innererror", "innerError", "detail", "details"}) {
+                if (object.has(name)) collectErrorDetails(object.opt(name), parts, depth + 1);
+            }
+        }
+    }
+
+    private static String classificationError(Reply reply, String key) {
+        LinkedHashSet<String> parts = new LinkedHashSet<>();
+        collectErrorDetails(reply.body, parts, 0);
+        String detail = String.join(" · ", parts);
+        if (!key.isEmpty()) detail = detail.replace(key, "…");
+        detail = detail.replaceAll("[A-Za-z0-9+/=_-]{64,}", "…").replaceAll("[\\p{Cntrl}]+", " ").trim();
+        if (detail.length() > 320) detail = detail.substring(0, 320) + "…";
+        String message = "Decisions 影像分類失敗（HTTP " + reply.code + "）";
+        if (!detail.isEmpty()) message += "\n" + detail;
+        if (reply.requestId != null && reply.requestId.matches("[A-Za-z0-9._:-]{1,128}"))
+            message += "\n請求 ID：" + reply.requestId;
+        return message + "\n" + (reply.code == 400 ? "可重新分類，或手動選擇這張影像的類型。" : hint(reply.code));
+    }
+
     static String errorCode(JSONObject j) {
         JSONObject error=j.optJSONObject("error");
         String code=error==null?"":error.optString("code","");
@@ -64,9 +99,16 @@ final class AzureReader {
                 if(!raw.trim().isEmpty()) {
                     try {result=new JSONObject(raw);} catch(JSONException e) {
                         if(status>=200 && status<300) throw new IOException("Azure 未傳回有效 JSON，請核對端點。");
+                        if (c.getContentType() != null && c.getContentType().startsWith("text/plain"))
+                            result.put("message", raw.trim());
                     }
                 }
-                return new Reply(status,c.getHeaderField("Operation-Location"),Math.max(1,c.getHeaderFieldInt("Retry-After",2)),result);
+                String requestId = c.getHeaderField("apim-request-id");
+                if (requestId == null) requestId = c.getHeaderField("x-ms-request-id");
+                if (requestId == null) requestId = c.getHeaderField("x-request-id");
+                if (requestId == null) requestId = c.getHeaderField("request-id");
+                return new Reply(status, c.getHeaderField("Operation-Location"),
+                    Math.max(1, c.getHeaderFieldInt("Retry-After", 2)), result, requestId);
             } finally {c.disconnect();}
         }
     }
@@ -74,13 +116,13 @@ final class AzureReader {
     AzureReader(CardCatalog catalog,Config config,Transport transport,Sleeper sleeper) {
         this.catalog=catalog;this.config=config;this.transport=transport;this.sleeper=sleeper;
     }
-    JSONObject decisionBody(String png) throws JSONException {
+    JSONObject decisionBody(String imageBase64) throws JSONException {
         JSONObject criteria=new JSONObject();
         for(CardCatalog.Card card:catalog.cards.values()) criteria.put(card.code,card.label + "：" + card.criteria);
         String instruction="依照各類型的分類描述比對整張影像，選出最符合的類型，留意描述中的正反面特徵。無法判定時選 other。";
         if (!config.openAI) {
-            return obj("model",config.model,"state","判斷影像類型：image:card.png",
-                "assets",obj("card.png",obj("type","image","format","png","data_base64",png)),
+            return obj("model",config.model,"state","Document image: image:card.jpg",
+                "assets",obj("card.jpg",obj("type","image","format","jpeg","data_base64",imageBase64)),
                 "questions",obj(QUESTION,obj("type","choice","instructions",instruction,"criteria",criteria)));
         }
         JSONArray choices=new JSONArray();
@@ -88,14 +130,14 @@ final class AzureReader {
             String code=it.next();choices.put(obj("value",code,"description",criteria.getString(code)));
         }
         return obj("model",config.model,"input",new JSONArray().put(obj("role","user","content",new JSONArray()
-            .put(obj("type","input_text","text","請判斷這張影像的類型。")).put(obj("type","input_image","image_url","data:image/png;base64,"+png)))),
+            .put(obj("type","input_text","text","請判斷這張影像的類型。")).put(obj("type","input_image","image_url","data:image/png;base64,"+imageBase64)))),
             "questions",new JSONArray().put(obj("name",QUESTION,"type","choice","instructions",instruction,"choices",choices)));
     }
     String classify(Bitmap preview) throws Exception {
-        byte[] png=CardPhoto.encoded(preview,Bitmap.CompressFormat.PNG,100);
+        byte[] image = config.openAI ? CardPhoto.encoded(preview, Bitmap.CompressFormat.PNG, 100) : CardPhoto.decisionJpeg(preview);
         Reply r=transport.call("POST",config.decisionRoot+(config.openAI?Config.OA:Config.MS),"api-key",config.decisionKey,
-            decisionBody(Base64.encodeToString(png,Base64.NO_WRAP)));
-        r.check("影像分類失敗");
+            decisionBody(Base64.encodeToString(image,Base64.NO_WRAP)));
+        if (r.code < 200 || r.code >= 300) throw new IOException(classificationError(r, config.decisionKey));
         return readChoice(r.body);
     }
     String readChoice(JSONObject body) throws Exception {
@@ -185,11 +227,14 @@ final class AzureReader {
     Reading read(CardCatalog.Card type, byte[] jpeg, boolean includeFields, Progress progress) throws Exception {
         String base = config.cuRoot + "/contentunderstanding/analyzers/";
         boolean structured = includeFields && type.hasFields();
+        if (structured && config.cuModel.startsWith("text-embedding-")) {
+            throw new IOException("自訂欄位需要文字生成模型。請在連線設定填入已對應的模型，例如 gpt-5.2，或在本次欄位讀取方式選「只讀全文」。");
+        }
         String analyzer = structured ? type.analyzerId(config.cuModel) : type.textAnalyzer();
         if (structured) {
             ensureAnalyzer(type, base + analyzer, progress);
         }
-        progress.show("已辨識為" + type.label + "，正在讀取文字…");
+        progress.show("正在讀取" + type.label + "的文字…");
         JSONObject input = obj("name", "scan.jpg", "mimeType", "image/jpeg",
             "data", Base64.encodeToString(jpeg, Base64.NO_WRAP));
         Reply start = cu("POST", base + analyzer + ":analyze" + VERSION,

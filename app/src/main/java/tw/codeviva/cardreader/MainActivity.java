@@ -180,7 +180,7 @@ public class MainActivity extends Activity {
             row.addView(spin,ui.dp(28),ui.dp(28));ui.gap(row,12);row.addView(ui.text(status,16,INK,true));return;
         }
         if(photo==null)return;
-        if (classified == null) {
+        if (selected == null) {
             heading(box, "確認照片");
             ui.gap(box, 8);
             note(box, "按下開始後，影像將傳送至設定的 Azure 資源進行分類與文字辨識。");
@@ -193,7 +193,7 @@ public class MainActivity extends Activity {
         } else {
             heading(box, "文件類型");
             ui.gap(box, 6);
-            note(box, "Decisions 判定為" + catalog.cards.get(classified).label + "。");
+            note(box, classified == null ? "已手動選擇類型，可直接讀取這張影像。" : "Decisions 判定為" + catalog.cards.get(classified).label + "。");
             ui.gap(box, 8);
             box.addView(ui.action(catalog.cards.get(selected).label + "　⌄", false, this::selectType));
         }
@@ -214,10 +214,17 @@ public class MainActivity extends Activity {
         }
         ui.gap(box, 12);
         if (!config.ready()) box.addView(ui.action("設定 Azure 連線", true, this::settings));
-        else if (classified == null) box.addView(ui.action("開始辨識", true, this::classify));
+        else if (selected == null) box.addView(ui.action(error.isEmpty() ? "開始辨識" : "重新分類", true, this::classify));
         else box.addView(ui.action("讀取文字", true, this::readText));
         showError(content);
-        if(!error.isEmpty()){ui.gap(content,10);content.addView(ui.action("檢查連線設定",false,this::settings));}
+        if (!error.isEmpty()) {
+            if (selected == null && config.ready()) {
+                ui.gap(content, 10);
+                content.addView(ui.action("手動選擇類型", false, this::selectType));
+            }
+            ui.gap(content, 10);
+            content.addView(ui.action("檢查連線設定", false, this::settings));
+        }
     }
     AzureReader createReader() {
         return new AzureReader(catalog, config);
@@ -251,7 +258,7 @@ public class MainActivity extends Activity {
         byte[] bytes = photo.jpeg;
         boolean fields = fieldMode == 1 || (fieldMode == 0 && type.autoFields);
         int token = sequence + 1;
-        run("已辨識為" + type.label + "，正在讀取文字…", () -> api.read(type, bytes, fields,
+        run("正在讀取" + type.label + "的文字…", () -> api.read(type, bytes, fields,
             message -> runOnUiThread(() -> {
                 if (sequence == token && busy && !isDestroyed()) {
                     status = message;
@@ -328,8 +335,8 @@ public class MainActivity extends Activity {
         ui.gap(cu,6);note(cu,"全文使用內建 Read 或 Layout 分析器。若啟用自訂欄位，才需另設擷取模型與 text-embedding-3-large 的部署對應，並允許建立分析器。");
         EditText ce=field(cu,"Content Understanding 資源端點",config.cuRoot,"https://資源名稱.services.ai.azure.com",false);
         EditText ck=field(cu,"Content Understanding API 金鑰",config.cuKey,"同一資源可填相同金鑰",true);
-        EditText cm=field(cu,"自訂欄位用基礎模型名稱",config.cuModel,"例如 gpt-5.2",false);
-        ui.gap(cu,6);note(cu,"填 Azure 預設模型對應左側的模型名稱。");
+        EditText cm=field(cu,"自訂欄位用文字生成模型（completion）",config.cuModel,"例如 gpt-5.2",false);
+        ui.gap(cu,6);note(cu,"只讀全文時可保留原設定。擷取欄位時填入已在 Azure 對應的文字生成模型名稱，例如 gpt-5.2。text-embedding-3-large 專供向量化。");
         ui.gap(content,12);TextView msg=ui.text("",14,0xff863b24,false);msg.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);content.addView(msg);
         ui.gap(content,4);content.addView(ui.action("儲存連線設定",true,()->{
             Config c=new Config();c.openAI=provider.getSelectedItemPosition()==1;
