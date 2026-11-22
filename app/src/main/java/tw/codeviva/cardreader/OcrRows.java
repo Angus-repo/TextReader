@@ -23,6 +23,44 @@ final class OcrRows {
     private static final Pattern NHI_BIRTH = Pattern.compile("[0-9]{1,4}([./-])(?:0?[1-9]|1[0-2])\\1(?:0?[1-9]|[12][0-9]|3[01])");
     private static final Pattern NHI_NUMBER = Pattern.compile("[0-9]{4}(?:" + SPACE + "*[0-9]{4}){2}");
     private static final Pattern NAME_TEXT = Pattern.compile("[\\p{L}][\\p{L}\\p{M} ·・‧．.'’-]*");
+    private static final String PRINTED_NAME = "姓[\\s\\p{Z}]*名";
+    private static final Pattern ID_NAME_END = Pattern.compile(PRINTED_NAME
+            + "|出[\\s\\p{Z}]*生|年月日|民國|性[\\s\\p{Z}]*[別别]|[發发]證|統一編號|身分證字號|中華民國");
+    private static final Pattern HAN_TEXT = Pattern.compile("\\p{sc=Han}+");
+    private static final Pattern HAN_SPACE = Pattern.compile("(?<=\\p{sc=Han})[\\p{Z}\\t]+(?=\\p{sc=Han})");
+
+    static ResultLayout.Row frontName(String label, String text) {
+        String heading = label.equals("姓名") ? PRINTED_NAME : PRINTED_NAME + "|" + Pattern.quote(label);
+        Matcher headings = Pattern.compile("(?<![^\\s\\p{Z}])(?:" + heading + ")[\\p{Z}\\t:：]*").matcher(text);
+        Matcher boundary = ID_NAME_END.matcher(text);
+        ResultLayout.Row missing = new ResultLayout.Row(label, null, Double.NaN);
+        ResultLayout.Row found = missing;
+        while (headings.find()) {
+            int start = headings.end();
+            int end = boundary.find(start) ? boundary.start() : text.length();
+            StringBuilder name = new StringBuilder();
+            String note = null;
+            for (String line : text.substring(start, end).trim().split("\\r\\n|\\r|\\n")) {
+                String part = HAN_SPACE.matcher(EDGE_SPACE.matcher(line).replaceAll("")).replaceAll("");
+                if (part.matches("[樣样]|[樣样]張")) {
+                    note = "姓名附近有浮水印，請核對原件。";
+                    break;
+                }
+                if (!NAME_TEXT.matcher(part).matches()) break;
+                if (name.length() > 0) {
+                    // Continue only a fragmented Han name, not prose from the following row.
+                    if (!HAN_TEXT.matcher(name).matches() || !HAN_TEXT.matcher(part).matches()) break;
+                    if (part.codePointCount(0, part.length()) > 2) break;
+                }
+                name.append(part);
+            }
+            if (name.length() == 0) continue;
+            String value = name.toString();
+            if (found.value != null && !found.value.equals(value)) return missing;
+            found = new ResultLayout.Row(label, value, Double.NaN, note);
+        }
+        return found;
+    }
 
     static List<ResultLayout.Row> from(CardCatalog.Card card, String text) {
         Set<String> labels = new LinkedHashSet<>();

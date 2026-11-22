@@ -566,6 +566,49 @@ public class CardReaderTest {
         }
     }
 
+    @Test public void attachedAndFragmentedFrontNameIsShownInSavedResultsAndJson() throws Exception {
+        CardCatalog.Card type = catalog.cards.get("id_front");
+        String raw = "中華民國國民身分證\n姓名林\n禾\n樣\n出生\n年月日\n民國 80 年\n性別 女";
+        ReaderScreen ui = new ReaderScreen(RuntimeEnvironment.getApplication());
+        try (ReadingHistory db = new ReadingHistory(ui.c)) {
+            for (JSONObject cloud : Arrays.asList(null, obj("Sex", obj("valueString", "女")))) {
+                String id = db.add(new AzureReader.Reading(type, raw, cloud));
+                LinearLayout page = ui.col();
+                new ResultLayout(ui, page).show(db.get(id));
+                assertNotNull(find(page, "姓名"));
+                assertNotNull(find(page, "林禾"));
+                assertNotNull(find(page, "姓名附近有浮水印，請核對原件。"));
+                JSONObject json = new JSONObject(((TextView)page.findViewWithTag("transcript-json")).getText().toString());
+                assertEquals("林禾", json.getJSONObject("欄位").getString("姓名"));
+                assertEquals("女", json.getJSONObject("欄位").getString("性別"));
+                assertEquals(Arrays.asList(raw.split("\\n")), jsonStrings(json.getJSONArray("原文逐行")));
+            }
+        }
+        LinearLayout cloudPage = ui.col();
+        new ResultLayout(ui, cloudPage).show(new AzureReader.Reading(type, raw,
+                obj("Name", obj("valueString", "林以安", "confidence", .98))));
+        assertNotNull(find(cloudPage, "林以安"));
+        assertNotNull(find(cloudPage, "信心 98%"));
+        assertNull(find(cloudPage, "林禾"));
+        LinearLayout missingPage = ui.col();
+        new ResultLayout(ui, missingPage).show(new AzureReader.Reading(type, "姓名\n出生\n年月日", null));
+        JSONObject fields = new JSONObject(((TextView)missingPage.findViewWithTag("transcript-json")).getText().toString())
+                .getJSONObject("欄位");
+        assertNotNull(find(missingPage, "姓名"));
+        assertSame(JSONObject.NULL, fields.get("姓名"));
+    }
+
+    @Test public void printedFrontNamePreservesSpellingAndStopsAtOtherFields() {
+        assertEquals("歐陽子安", OcrRows.frontName("姓名", "姓\n名歐　陽\n子安\n發證日期").value);
+        assertEquals("林本安", OcrRows.frontName("姓名", "姓名林\n本\n安\n性別男").value);
+        assertEquals("林樣安", OcrRows.frontName("姓名", "姓名 林樣安").value);
+        assertEquals("Kolas Yotaka", OcrRows.frontName("姓名", "姓 名：Kolas Yotaka　出生年月日").value);
+        assertEquals("林禾", OcrRows.frontName("持證人", "姓名林禾").value);
+        assertEquals("王甲", OcrRows.frontName("持證人", "持證人：王甲").value);
+        assertNull(OcrRows.frontName("姓名", "國民身分證\n性別 女").value);
+        assertNull(OcrRows.frontName("姓名", "姓名林甲\n姓名王乙").value);
+    }
+
     @Test public void textLayoutPreservesUnlabeledProseAndMultilineAddresses() throws Exception {
         try (ActivityController<MainActivity> ctl = Robolectric.buildActivity(MainActivity.class).setup()) {
             ReaderScreen ui = new ReaderScreen(ctl.get());

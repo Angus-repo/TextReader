@@ -47,6 +47,7 @@ final class ResultLayout {
         java.util.Map<String,String> licenseLabels = license ? LicenseFields.labeled(reading.type, displayText) : null;
         java.util.Map<String,String> transcript = license ? LicenseTranscript.read(reading.type.code,displayText) : null;
         boolean front = reading.type.code.equals("id_front"), back = reading.type.code.equals("id_back");
+        String nameLabel = front ? reading.type.fieldLabel("Name") : null;
         String sexLabel = front ? reading.type.fieldLabel("Sex") : null;
         String idLabel = front ? reading.type.fieldLabel("IdNumber") : null;
         String serviceLabel = back ? reading.type.fieldLabel("MilitaryService") : null;
@@ -107,7 +108,7 @@ final class ResultLayout {
         if (!nhi && !license && rows.isEmpty()) {
             rows = OcrRows.from(reading.type, displayText);
             // Resolve these labels below, even when cloud extraction returned other fields.
-            if (front) rows.removeIf(row -> "性別".equals(row.label) || row.label.equals(sexLabel)
+            if (front) rows.removeIf(row -> row.label.equals(nameLabel) || "性別".equals(row.label) || row.label.equals(sexLabel)
                     || "統一編號".equals(row.label) || "身分證字號".equals(row.label) || row.label.equals(idLabel));
             if (back) rows.removeIf(row -> "役別".equals(row.label) || row.label.equals(serviceLabel)
                     || row.label.equals(serialLabel) || backBarcodeLabel(row.label)
@@ -115,6 +116,10 @@ final class ResultLayout {
             for (Row row : rows) missing.remove(row.label);
         }
 
+        if (nameLabel != null && uniqueRow(rows, nameLabel) == null) {
+            rows.add(0, OcrRows.frontName(nameLabel, displayText));
+            missing.remove(nameLabel);
+        }
         if (sexLabel != null && uniqueRow(rows, sexLabel) == null) {
             String sex = IdCardDetails.printedSex(displayText);
             if (sex.isEmpty()) {
@@ -232,12 +237,16 @@ final class ResultLayout {
     }
 
     static final class Row {
-        final String label, value;
+        final String label, value, note;
         final double confidence;
         Row(String label, String value, double confidence) {
+            this(label, value, confidence, null);
+        }
+        Row(String label, String value, double confidence, String note) {
             this.label = label;
             this.value = value;
             this.confidence = confidence;
+            this.note = note;
         }
     }
 
@@ -263,6 +272,7 @@ final class ResultLayout {
         value.setBreakStrategy(android.text.Layout.BREAK_STRATEGY_BALANCED);
         value.setTextIsSelectable(true);
         values.addView(value);
+        if (data.note != null) values.addView(ui.text(data.note, 13, MUTED, false));
         if (data.confidence >= 0 && data.confidence <= 1) {
             ui.gap(values, 3);
             values.addView(ui.text("信心 " + Math.round(data.confidence * 100) + "%", 12, MUTED, false));
