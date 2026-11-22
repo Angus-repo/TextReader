@@ -8,6 +8,7 @@ import java.io.*;
 final class CardPhoto {
     final Bitmap preview;
     final byte[] jpeg;
+    final ScanUsage usage = new ScanUsage();
     CardPhoto(Bitmap preview,byte[] jpeg){this.preview=preview;this.jpeg=jpeg;}
     static byte[] encoded(Bitmap b,Bitmap.CompressFormat format,int quality) throws IOException {
         ByteArrayOutputStream bytes=new ByteArrayOutputStream();

@@ -19,6 +19,7 @@ final class AzureReader {
     final Config config;
     final Transport transport;
     final Sleeper sleeper;
+    ScanUsage usage = new ScanUsage();
     interface Progress { void show(String message); }
     interface Sleeper { void pause(long ms) throws InterruptedException; }
     interface Transport { Reply call(String method,String url,String header,String key,JSONObject data) throws Exception; }
@@ -135,8 +136,10 @@ final class AzureReader {
     }
     String classify(Bitmap preview) throws Exception {
         byte[] image = config.openAI ? CardPhoto.encoded(preview, Bitmap.CompressFormat.PNG, 100) : CardPhoto.decisionJpeg(preview);
+        JSONObject op = usage.begin("Decisions 分類");
         Reply r=transport.call("POST",config.decisionRoot+(config.openAI?Config.OA:Config.MS),"api-key",config.decisionKey,
             decisionBody(Base64.encodeToString(image,Base64.NO_WRAP)));
+        ScanUsage.decision(op, r.body, config);
         if (r.code < 200 || r.code >= 300) throw new IOException(classificationError(r, config.decisionKey));
         return readChoice(r.body);
     }
@@ -218,6 +221,7 @@ final class AzureReader {
         final JSONObject fields;
         final JSONObject local;
         final double pageAngle;
+        JSONObject usage;
 
         Reading(CardCatalog.Card type, String text, JSONObject fields) {
             this(type, text, fields, new JSONObject(), 0);
@@ -244,9 +248,13 @@ final class AzureReader {
         progress.show("正在讀取" + type.label + "的文字…");
         JSONObject input = obj("name", "scan.jpg", "mimeType", "image/jpeg",
             "data", Base64.encodeToString(jpeg, Base64.NO_WRAP));
+        JSONObject op = usage.begin("Content Understanding 讀取");
         Reply start = cu("POST", base + analyzer + ":analyze" + VERSION,
             obj("inputs", new JSONArray().put(input)));
-        JSONObject result = waitFor(start, "文字讀取失敗", true).getJSONObject("result");
+        JSONObject operation = waitFor(start, "文字讀取失敗", true);
+        JSONObject result = operation.getJSONObject("result");
+        JSONObject meters = operation.optJSONObject("usage");
+        ScanUsage.document(op, meters == null ? result.optJSONObject("usage") : meters, structured, analyzer, config);
         JSONArray contents = result.getJSONArray("contents");
         if (contents.length() == 0) throw new IOException("Azure 未傳回影像內容，請稍後重試。");
 

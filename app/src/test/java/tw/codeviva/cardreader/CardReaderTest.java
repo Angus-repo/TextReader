@@ -27,6 +27,81 @@ public class CardReaderTest {
         catalog=new CardCatalog(RuntimeEnvironment.getApplication());
         config=new tw.codeviva.cardreader.Config();config.cuRoot=config.decisionRoot=ROOT;
     }
+    @Test public void sumsAzureDecisionAndDocumentMetersWithoutCountingCacheOrPagesAsExtraModelTokens() throws Exception {
+        ScanUsage use = new ScanUsage();
+        config.openAI = true;
+        ScanUsage.decision(use.begin("分類"), obj("usage", obj("input_tokens",1000,"output_tokens",0,"total_tokens",1000,
+                "input_tokens_details",obj("cached_tokens",200,"cache_write_tokens",100))), config);
+        ScanUsage.document(use.begin("讀取"), obj("documentPagesStandard",1,"contextualizationTokens",1000,
+                "tokens",obj("gpt-5.2-input",1000,"gpt-5.2-output",100,"text-embedding-3-large",1000)), true,"custom",config);
+        use.activeMillis = 2800;
+        JSONObject saved = use.snapshot();
+        assertEquals(4100, saved.getLong("tokens"));
+        // Classification 0.0000845, page 0.005, context 0.001, generation 0.00315, embedding 0.00013.
+        assertEquals("0.0093645", saved.getString("usd"));
+        assertFalse(saved.getBoolean("partialCost"));
+        assertFalse(saved.getBoolean("partialTokens"));
+        assertTrue(ScanUsage.summary(saved).contains("2.80 秒"));
+        assertTrue(ScanUsage.breakdown(saved).contains("gpt-5.2-output"));
+        config.decisionRate = "0.05";
+        config.openAI = false;
+        JSONObject another = new JSONObject();
+        ScanUsage.decision(another, obj("usage",obj("input_tokens",1000)), config);
+        assertEquals(0, new java.math.BigDecimal("0.00005").compareTo(new java.math.BigDecimal(another.getString("usd"))));
+    }
+
+    @Test public void missingMetersAndPricesKeepKnownSubtotalAndCompletedRetries() throws Exception {
+        ScanUsage use = new ScanUsage();
+        use.begin("前次未回報的分類");
+        ScanUsage.decision(use.begin("重試分類"),obj("usage",obj("input_tokens",1000,"output_tokens",0)),config);
+        ScanUsage.document(use.begin("讀取"),obj("documentPagesStandard",1,"contextualizationTokens",1000,
+                "tokens",obj("new-model-output",17)),true,"custom",config);
+        JSONObject u = use.snapshot();
+        assertEquals(2017, u.getLong("tokens"));
+        assertEquals("0.006042",u.getString("usd"));
+        assertTrue(u.getBoolean("partialTokens"));
+        assertTrue(u.getBoolean("partialCost"));
+        assertTrue(ScanUsage.summary(u).contains("已知小計"));
+        ScanUsage plain = new ScanUsage();
+        ScanUsage.document(plain.begin("讀取"),null,false,"prebuilt-read",config);
+        JSONObject result = plain.snapshot();
+        assertEquals("0.001",result.getString("usd"));
+        assertEquals(0,result.getLong("tokens"));
+        assertTrue(ScanUsage.breakdown(result).contains("依上傳影像估計"));
+        config.cuModel="new-model"; config.completionOutput="2";
+        JSONObject op = new JSONObject();
+        ScanUsage.document(op,obj("documentPagesBasic",1,"contextualizationTokens",1000,"tokens",obj("new-model-output",500)),true,"custom",config);
+        assertTrue(op.getBoolean("priced"));
+        assertEquals(0, new java.math.BigDecimal("0.003").compareTo(new java.math.BigDecimal(op.getString("usd"))));
+    }
+
+    @Test public void versionOneHistoryUpgradesAndUsageSurvivesBackupAndReopen() throws Exception {
+        android.content.Context ctx = RuntimeEnvironment.getApplication();
+        String id = UUID.randomUUID().toString();
+        JSONObject old = obj("id",id,"createdAt",1,"type",obj("code","other","label","舊紀錄","criteria","其他","fields",new JSONArray()),"text","舊原文");
+        try (android.database.sqlite.SQLiteDatabase db = ctx.openOrCreateDatabase("reading-history.db",0,null)) {
+            db.execSQL("CREATE TABLE readings(id TEXT PRIMARY KEY NOT NULL, created INTEGER NOT NULL, label TEXT NOT NULL, record TEXT NOT NULL)");
+            db.execSQL("INSERT INTO readings VALUES(?,?,?,?)",new Object[]{id,1,"舊紀錄",old.toString()});
+            db.setVersion(1);
+        }
+        try (ReadingHistory store = new ReadingHistory(ctx)) {
+            assertEquals(ScanUsage.LEGACY,store.list().get(0).usageSummary);
+            assertEquals("舊原文",store.get(id).text);
+            ScanUsage use = new ScanUsage(); use.activeMillis=3320;
+            ScanUsage.document(use.begin("文字"),obj("documentPagesBasic",1),false,"prebuilt-read",config);
+            AzureReader.Reading reading = new AzureReader.Reading(catalog.cards.get("other"),"新的原文",null);
+            reading.usage = use.snapshot();
+            String added = store.add(reading);
+            String summary = store.list().get(0).usageSummary;
+            assertTrue(summary.contains("3.32 秒")); assertTrue(summary.contains("US$0.001"));
+            java.io.ByteArrayOutputStream file = new java.io.ByteArrayOutputStream();
+            store.exportTo(file); store.clear(); store.importFrom(new java.io.ByteArrayInputStream(file.toByteArray()));
+            assertEquals(summary, store.list().get(0).usageSummary);
+            assertEquals(reading.usage.toString(),store.get(added).usage.toString());
+            assertNull(store.get(id).usage);
+        }
+    }
+
     @Test public void bothDecisionContractsIncludeEveryType() throws Exception {
         for(boolean open:new boolean[]{false,true}){
             config.openAI=open;AzureReader api=new AzureReader(catalog,config);
@@ -621,11 +696,11 @@ public class CardReaderTest {
                 activity.reader = new AzureReader(catalog, config, (method,url,header,key,body) -> {
                     if (url.endsWith(tw.codeviva.cardreader.Config.MS)) {
                         calls.add("classify");
-                        return reply(200,null,obj("answers",obj(AzureReader.QUESTION,obj("type","choice","choice","receipt"))));
+                        return reply(200,null,obj("usage",obj("input_tokens",1000,"output_tokens",0),"answers",obj(AzureReader.QUESTION,obj("type","choice","choice","receipt"))));
                     }
                     if (!url.contains("prebuilt-layout:analyze")) throw new IOException("Wrong analyzer");
                     calls.add("read");
-                    return reply(200,null,obj("result",obj("contents",new JSONArray().put(obj("markdown","合計 365")))));
+                    return reply(200,null,obj("usage",obj("documentPagesStandard",1),"result",obj("contents",new JSONArray().put(obj("markdown","合計 365")))));
                 }, ms -> {});
                 android.graphics.Bitmap bitmap = android.graphics.Bitmap.createBitmap(4,4,android.graphics.Bitmap.Config.ARGB_8888);
                 setField(activity, "config", config);
@@ -639,6 +714,7 @@ public class CardReaderTest {
                 if (reviewFirst) {
                     awaitText(root, "讀取文字");
                     assertEquals(Collections.singletonList("classify"), calls);
+                    org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMinutes(10));
                     find(root, "讀取文字").performClick();
                 }
                 awaitText(root, "辨識原文（JSON）");
@@ -646,6 +722,16 @@ public class CardReaderTest {
                 assertEquals("合計 365", new JSONObject(json.getText().toString()).getJSONArray("原文逐行").getString(0));
                 assertEquals(Arrays.asList("classify","read"), calls);
                 assertNotNull(find(root, "收據／發票"));
+                assertNotNull(find(root, "本次辨識用量"));
+                try (ReadingHistory db = new ReadingHistory(activity)) {
+                    ReadingHistory.Entry entry = db.list().get(0);
+                    JSONObject usage = db.get(entry.id).usage;
+                    assertEquals(1000, usage.getLong("tokens"));
+                    assertEquals("0.005042", usage.getString("usd"));
+                    assertTrue(usage.getLong("elapsedMs") < 600000);
+                    activity.onBackPressed();
+                    assertNotNull(find(root, entry.usageSummary));
+                }
             }
         }
     }

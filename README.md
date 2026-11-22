@@ -2,7 +2,7 @@
 
 TextReader 是一個 Android 影像文字讀取工具。即時裁切文件或從相簿選圖後，由 Azure Decisions 判斷影像類型，再由 Azure Content Understanding 讀取全文。結果自動儲存在手機的「辨識紀錄」，同類型的多筆結果可分別開啟。
 
-**[下載 TextReader 1.5.1 APK](https://github.com/Angus-repo/TextReader/raw/refs/heads/main/apk/TextReader-1.5.1.apk)**。支援 Android 9 以上，沿用 1.0.0「台灣證件讀取」的套件名稱、簽署憑證與連線設定。
+**[下載 TextReader 1.6.0 APK](https://github.com/Angus-repo/TextReader/raw/refs/heads/main/apk/TextReader-1.6.0.apk)**。支援 Android 9 以上，沿用 1.0.0「台灣證件讀取」的套件名稱、簽署憑證與連線設定。
 
 ## 使用方式
 
@@ -14,6 +14,14 @@ TextReader 是一個 Android 影像文字讀取工具。即時裁切文件或從
 6. 如要先解除安裝，先在首頁點「匯出備份」，選擇保存位置。備份是明文 JSON，含原文、當時的欄位規則及擷取結果。完成重裝後點「匯入備份」，可合併還原並略過重複紀錄。系統若在解除安裝時提供「保留應用程式資料」，也可以勾選。
 
 身分證正面會讀取卡面印出的性別與右下角統一編號，必要時以手機 OCR 放大補讀。身分證背面的左下角條碼會在手機上解碼，保留原始條碼，條碼內完整的一碼英文字母及九碼數字會填入「身分證字號」。右下角十碼印刷流水號另外讀取，保留前導零。「役別」即使沒有讀到文字也會保留欄名與空白值，JSON 對應空字串。字號無法讀取時顯示「未讀取」，JSON 為 null。讀取成功的值會一併出現在欄位、JSON 與辨識紀錄。舊紀錄可依先前的文字補顯性別，缺少影像的舊紀錄須重掃才能解碼條碼。
+
+## 辨識用量與費用
+
+首頁每筆紀錄列出本次已回報的 token 數、處理耗時及美元估價。點開可看分類、頁數、情境與模型 token 明細。計時涵蓋同張圖的分類、分析器準備、雲端輪詢、重試與手機補讀，排除手動選擇類型時的等待。舊紀錄顯示「未記錄」。匯出與匯入會保留當時的用量和估價。
+
+費用採 2026-11-22 查核的 Global Standard 美元參考價。Microsoft Decision 1.1、Azure OpenAI Decisions、OCR 頁數、情境 token、GPT-5.2 與 text-embedding-3-large 依各自的計價項目計算。只讀一張照片且 Azure 缺少頁數時，依當次 Read 或 Layout 估算一頁並標示。缺少用量或模型單價時顯示已知小計。部署在不同區域或有議價折扣時，可於「連線設定 → 估算費用單價」填入模型費率。實際扣款以 Azure 帳單為準。
+
+[Microsoft Decision 1.1 費率](https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/introducing-microsoft-decision-1-1-build-faster-more-efficient-ai-applications-w/4573877) · [Azure OpenAI Decisions 費率](https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/azure-openai-decisions-api-now-generally-available-in-microsoft-foundry/4567265) · [Content Understanding 計價](https://learn.microsoft.com/azure/ai-services/content-understanding/pricing-explainer)
 
 ## 依描述設定辨識規則
 

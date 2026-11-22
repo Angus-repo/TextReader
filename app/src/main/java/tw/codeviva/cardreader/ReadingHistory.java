@@ -22,28 +22,30 @@ final class ReadingHistory extends SQLiteOpenHelper {
     private static final String FORMAT = "TextReader.history.v1";
 
     ReadingHistory(Context context) {
-        super(context.getApplicationContext(), "reading-history.db", null, 1);
+        super(context.getApplicationContext(), "reading-history.db", null, 2);
     }
     @Override public void onCreate(SQLiteDatabase db) {
-        db.execSQL("CREATE TABLE readings(id TEXT PRIMARY KEY NOT NULL, created INTEGER NOT NULL, label TEXT NOT NULL, record TEXT NOT NULL)");
+        db.execSQL("CREATE TABLE readings(id TEXT PRIMARY KEY NOT NULL, created INTEGER NOT NULL, label TEXT NOT NULL, record TEXT NOT NULL, usage_summary TEXT)");
     }
     @Override public void onUpgrade(SQLiteDatabase db, int from, int to) {
-        throw new IllegalStateException("無法升級辨識紀錄資料庫。");
+        if (from == 1 && to == 2) db.execSQL("ALTER TABLE readings ADD COLUMN usage_summary TEXT");
+        else throw new IllegalStateException("無法升級辨識紀錄資料庫。");
     }
 
     static final class Entry {
-        final String id, label;
+        final String id, label, usageSummary;
         final long time;
         Entry(Cursor row) {
             id = row.getString(0);
             label = row.getString(1);
             time = row.getLong(2);
+            usageSummary = row.isNull(3) ? ScanUsage.LEGACY : row.getString(3);
         }
     }
 
     List<Entry> list() {
         List<Entry> entries = new ArrayList<>();
-        try (Cursor rows = getReadableDatabase().rawQuery("SELECT id,label,created FROM readings ORDER BY created DESC,rowid DESC", null)) {
+        try (Cursor rows = getReadableDatabase().rawQuery("SELECT id,label,created,usage_summary FROM readings ORDER BY created DESC,rowid DESC", null)) {
             while (rows.moveToNext()) entries.add(new Entry(rows));
         }
         return entries;
@@ -55,6 +57,7 @@ final class ReadingHistory extends SQLiteOpenHelper {
         CardCatalog.Card type = reading.type;
         JSONObject record = obj("id", id, "createdAt", now, "type", obj("code", type.code, "label", type.label,
             "criteria", type.criteria, "fields", type.fields), "text", reading.text);
+        if (reading.usage != null) record.put("usage", reading.usage);
         if (reading.fields != null) record.put("fields", reading.fields);
         if (reading.local.length() > 0) record.put("local", reading.local);
         insert(getWritableDatabase(), id, now, type.label, record);
@@ -62,12 +65,15 @@ final class ReadingHistory extends SQLiteOpenHelper {
     }
 
     private static boolean insert(SQLiteDatabase db, String id, long time, String label, JSONObject record) {
-        try (SQLiteStatement stmt = db.compileStatement("INSERT INTO readings(id,created,label,record) SELECT ?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM readings WHERE id=?)")) {
+        try (SQLiteStatement stmt = db.compileStatement("INSERT INTO readings(id,created,label,record,usage_summary) SELECT ?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM readings WHERE id=?)")) {
             stmt.bindString(1, id);
             stmt.bindLong(2, time);
             stmt.bindString(3, label);
             stmt.bindString(4, record.toString());
-            stmt.bindString(5, id);
+            JSONObject usage = record.optJSONObject("usage");
+            if (usage == null) stmt.bindNull(5);
+            else stmt.bindString(5, ScanUsage.summary(usage));
+            stmt.bindString(6, id);
             return stmt.executeUpdateDelete() == 1;
         }
     }
@@ -89,8 +95,10 @@ final class ReadingHistory extends SQLiteOpenHelper {
             field.getString("key");
             field.getString("label");
         }
-        return new AzureReader.Reading(type, item.getString("text"), item.has("fields") ? item.getJSONObject("fields") : null,
+        AzureReader.Reading reading = new AzureReader.Reading(type, item.getString("text"), item.has("fields") ? item.getJSONObject("fields") : null,
                 item.has("local") ? item.getJSONObject("local") : new JSONObject(), 0);
+        reading.usage = item.optJSONObject("usage");
+        return reading;
     }
     void clear() {
         getWritableDatabase().delete("readings", null, null);

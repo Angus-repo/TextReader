@@ -104,7 +104,7 @@ public class MainActivity extends Activity {
             for (int i = 0; i < Math.min(historyLimit, entries.size()); i++) {
                 ReadingHistory.Entry entry = entries.get(i);
                 if (i > 0) ui.line(list);
-                ui.tile(list, entry.label, date.format(new Date(entry.time)), true, null, () -> openReading(entry.id));
+                ui.tile(list, entry.label, date.format(new Date(entry.time)), true, entry.usageSummary, () -> openReading(entry.id));
             }
             if (entries.size() > historyLimit)
                 list.addView(ui.action("顯示更多紀錄", false, () -> { historyLimit += 30; home(); }));
@@ -319,7 +319,12 @@ public class MainActivity extends Activity {
     private void classify() {
         AzureReader api = createReader();
         Bitmap previewImage = photo.preview;
-        run("Decisions 正在辨識影像類型…", () -> api.classify(previewImage), code -> {
+        api.usage = photo.usage;
+        run("Decisions 正在辨識影像類型…", () -> {
+            long start = android.os.SystemClock.elapsedRealtime();
+            try { return api.classify(previewImage); }
+            finally { api.usage.activeMillis += android.os.SystemClock.elapsedRealtime() - start; }
+        }, code -> {
             classified = code;
             selected = code;
             if (confirmType) preview();
@@ -342,18 +347,26 @@ public class MainActivity extends Activity {
         CardCatalog.Card type = catalog.cards.get(selected);
         AzureReader api = createReader();
         byte[] bytes = photo.jpeg;
+        api.usage = photo.usage;
         boolean fields = fieldMode == 1 || (fieldMode == 0 && type.autoFields);
         int token = sequence + 1;
         run("正在讀取" + type.label + "的文字…", () -> {
-            AzureReader.Reading reading = api.read(type, bytes, fields, message -> runOnUiThread(() -> {
-                if (sequence == token && busy && !isDestroyed()) {
-                    status = message;
-                    preview();
-                }
-            }));
-            if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
-            IdCardDetails.readImage(this, reading, bytes);
-            if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
+            long start = android.os.SystemClock.elapsedRealtime();
+            AzureReader.Reading reading;
+            try {
+                reading = api.read(type, bytes, fields, message -> runOnUiThread(() -> {
+                    if (sequence == token && busy && !isDestroyed()) {
+                        status = message;
+                        preview();
+                    }
+                }));
+                if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
+                IdCardDetails.readImage(this, reading, bytes);
+                if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
+            } finally {
+                api.usage.activeMillis += android.os.SystemClock.elapsedRealtime() - start;
+            }
+            reading.usage = api.usage.snapshot();
             try {
                 history.add(reading);
             } catch (android.database.SQLException e) {
@@ -380,6 +393,12 @@ public class MainActivity extends Activity {
     private void detail(AzureReader.Reading reading) {
         shell("detail", "讀取結果", this::home);
         new ResultLayout(ui, content).show(reading);
+        ui.gap(content, 12);
+        LinearLayout usagePanel = ui.panel();
+        content.addView(usagePanel);
+        usagePanel.addView(ui.text("本次辨識用量", 17, GREEN, true));
+        ui.gap(usagePanel, 6);
+        note(usagePanel, reading.usage == null ? ScanUsage.LEGACY : ScanUsage.breakdown(reading.usage));
         ui.gap(content, 16);
         content.addView(ui.action("繼續掃描", true, this::home));
     }
@@ -442,11 +461,27 @@ public class MainActivity extends Activity {
         EditText ck=field(cu,"Content Understanding API 金鑰",config.cuKey,"同一資源可填相同金鑰",true);
         EditText cm=field(cu,"自訂欄位用文字生成模型（completion）",config.cuModel,"例如 gpt-5.2",false);
         ui.gap(cu,6);note(cu,"只讀全文時可保留原設定。擷取欄位時填入已在 Azure 對應的文字生成模型名稱，例如 gpt-5.2。text-embedding-3-large 專供向量化。");
+        ui.gap(content,12);
+        LinearLayout rates = ui.panel();
+        content.addView(rates);
+        LinearLayout prices = ui.col();
+        rates.addView(ui.action("估算費用單價（選填）", false, () -> prices.setVisibility(prices.getVisibility() == View.GONE ? View.VISIBLE : View.GONE)));
+        rates.addView(prices);
+        prices.setVisibility(View.GONE);
+        note(prices, "每百萬 token 的美元價格。留空使用 Global Standard 參考價，各筆紀錄會保留當時的估算。");
+        EditText decisionPrice = field(prices, "Decisions 一般輸入", config.decisionRate, "Microsoft 0.042，Azure OpenAI 0.10", false);
+        EditText completionIn = field(prices, "欄位模型輸入", config.completionInput, "依部署模型", false);
+        EditText completionOut = field(prices, "欄位模型輸出", config.completionOutput, "依部署模型", false);
+        EditText completionCache = field(prices, "欄位模型快取輸入", config.completionCached, "依部署模型", false);
+        for (EditText price : new EditText[]{decisionPrice, completionIn, completionOut, completionCache})
+            price.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
         ui.gap(content,12);TextView msg=ui.text("",14,0xff863b24,false);msg.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);content.addView(msg);
         ui.gap(content,4);content.addView(ui.action("儲存連線設定",true,()->{
             Config c=new Config();c.openAI=provider.getSelectedItemPosition()==1;
             c.model=dep.getText().toString().trim();c.decisionRoot=de.getText().toString().trim();c.decisionKey=dk.getText().toString().trim();
             c.cuRoot=ce.getText().toString().trim();c.cuKey=ck.getText().toString().trim();c.cuModel=cm.getText().toString().trim();
+            c.decisionRate=decisionPrice.getText().toString().trim(); c.completionInput=completionIn.getText().toString().trim();
+            c.completionOutput=completionOut.getText().toString().trim(); c.completionCached=completionCache.getText().toString().trim();
             try{c.save(this);config=c;leaveSettings();Toast.makeText(this,"已儲存連線設定",Toast.LENGTH_SHORT).show();}
             catch(Exception ex){msg.setText(ex instanceof IllegalArgumentException?ex.getMessage():"無法使用 Android Keystore 儲存設定。");}
         }));
