@@ -1,0 +1,258 @@
+[
+  {
+    "code": "id_front",
+    "label": "身分證正面",
+    "criteria": "國民身分證，含姓名、相片、發證日期、統一編號。",
+    "fields": [
+      {
+        "key": "Name",
+        "label": "姓名",
+        "description": "持證人完整姓名（含原住民族並列姓名，如有）。"
+      },
+      {
+        "key": "IdNumber",
+        "label": "身分證字號",
+        "description": "卡面統一編號。"
+      },
+      {
+        "key": "BirthDate",
+        "label": "出生日期",
+        "description": "民國出生年月日，依印字保留。"
+      },
+      {
+        "key": "Sex",
+        "label": "性別",
+        "description": "卡面性別。"
+      },
+      {
+        "key": "IssueDate",
+        "label": "發證日期",
+        "description": "發證年月日。"
+      },
+      {
+        "key": "IssuePlace",
+        "label": "發證地點",
+        "description": "發證日期旁括號內的縣市。"
+      },
+      {
+        "key": "IssueType",
+        "label": "領補換類別",
+        "description": "初發、補發或換發等實際印字。"
+      }
+    ]
+  },
+  {
+    "code": "id_back",
+    "label": "身分證反面",
+    "criteria": "國民身分證背面，有父、母、配偶、出生地、住址、役別等欄。",
+    "fields": [
+      {
+        "key": "Father",
+        "label": "父姓名",
+        "description": "父欄姓名。"
+      },
+      {
+        "key": "Mother",
+        "label": "母姓名",
+        "description": "母欄姓名。"
+      },
+      {
+        "key": "Spouse",
+        "label": "配偶姓名",
+        "description": "配偶欄姓名。"
+      },
+      {
+        "key": "MilitaryService",
+        "label": "役別",
+        "description": "役別。"
+      },
+      {
+        "key": "Birthplace",
+        "label": "出生地",
+        "description": "出生地。"
+      },
+      {
+        "key": "Address",
+        "label": "戶籍地址",
+        "description": "住址完整文字（含村里鄰、樓層）。"
+      },
+      {
+        "key": "Serial",
+        "label": "證件流水號",
+        "description": "僅擷取可見的卡片流水號。"
+      }
+    ]
+  },
+  {
+    "code": "nhi_front",
+    "label": "健保卡正面",
+    "criteria": "全民健康保險卡正面，有健保標誌、持卡人姓名、晶片或健保卡卡號；可為無照片版。",
+    "fields": [
+      {
+        "key": "Name",
+        "label": "姓名",
+        "description": "持卡人完整姓名。"
+      },
+      {
+        "key": "IdNumber",
+        "label": "身分證／居留證號",
+        "description": "印在卡片上的身分證字號或居留證統一證號。"
+      },
+      {
+        "key": "BirthDate",
+        "label": "出生日期",
+        "description": "印在卡上的出生日期。"
+      },
+      {
+        "key": "Sex",
+        "label": "性別",
+        "description": "僅擷取有明文印製的性別，不從姓名、號碼或照片推定。"
+      },
+      {
+        "key": "NhiCardNumber",
+        "label": "健保卡卡號",
+        "description": "卡面下方的健保卡號，保留前導零，與身分證號區分。"
+      }
+    ]
+  },
+  {
+    "code": "dl_front",
+    "label": "駕照正面",
+    "criteria": "臺灣汽車或機車駕駛執照正面，有相片、駕照號碼、種類與發照日期。",
+    "fields": [
+      {
+        "key": "Name",
+        "label": "姓名",
+        "description": "持照人姓名。"
+      },
+      {
+        "key": "LicenseNumber",
+        "label": "駕照號碼",
+        "description": "駕駛執照號碼。"
+      },
+      {
+        "key": "BirthDate",
+        "label": "出生日期",
+        "description": "出生日期。"
+      },
+      {
+        "key": "Sex",
+        "label": "性別",
+        "description": "卡面明載的性別。"
+      },
+      {
+        "key": "LicenseClass",
+        "label": "駕照種類",
+        "description": "汽車或機車駕照種類的完整名稱。"
+      },
+      {
+        "key": "ConditionCode",
+        "label": "持照條件代碼",
+        "description": "正面條件欄填寫的代碼。"
+      },
+      {
+        "key": "Address",
+        "label": "地址",
+        "description": "正面完整地址。"
+      },
+      {
+        "key": "IssueDate",
+        "label": "發照日期",
+        "description": "發照日期。"
+      },
+      {
+        "key": "ExpiryDate",
+        "label": "有效日期",
+        "description": "有效日期。"
+      },
+      {
+        "key": "ControlNumber",
+        "label": "管轄／管制編號",
+        "description": "管轄或管制編號，保留前導零。"
+      },
+      {
+        "key": "Authority",
+        "label": "發照機關",
+        "description": "核發機關。"
+      }
+    ]
+  },
+  {
+    "code": "dl_back",
+    "label": "駕照反面",
+    "criteria": "臺灣汽機車駕照背面，有印製號碼、動員編號、持照條件對照或住所變更紀錄。",
+    "fields": [
+      {
+        "key": "PrintNumber",
+        "label": "印製號碼",
+        "description": "印製號碼，包含括號及前綴。"
+      },
+      {
+        "key": "Mobilization",
+        "label": "動員編號",
+        "description": "已填寫的動員編號。"
+      },
+      {
+        "key": "Conditions",
+        "label": "持照條件加註",
+        "description": "僅擷取已填寫、勾選或加註的個別條件，勿將通用 A/B/C 圖例當成個人限制。"
+      },
+      {
+        "key": "ChangeOfAddress",
+        "label": "住所變更",
+        "description": "實際登記的住所變更。"
+      },
+      {
+        "key": "Registration",
+        "label": "登記機關及日期",
+        "description": "已填寫的登記機關與年月日。"
+      },
+      {
+        "key": "Records",
+        "label": "審驗或紀錄",
+        "description": "職業駕駛審驗或其他已填寫紀錄。"
+      },
+      {
+        "key": "Notes",
+        "label": "備註",
+        "description": "已填寫的個人備註。"
+      }
+    ]
+  },
+  {
+    "code": "receipt",
+    "label": "收據／發票",
+    "criteria": "購買收據、電子發票證明聯、帳單或交易明細，通常含金額、日期及品項。",
+    "fields": []
+  },
+  {
+    "code": "form",
+    "label": "表單／表格",
+    "criteria": "需要填寫資料的申請書、問卷，或以欄列呈現的表格文件。",
+    "fields": []
+  },
+  {
+    "code": "business_card",
+    "label": "名片",
+    "criteria": "印有姓名、公司、職稱及聯絡資料的名片。",
+    "fields": []
+  },
+  {
+    "code": "document",
+    "label": "一般文件",
+    "criteria": "公文、信函、合約、書籍、報告或以段落為主的文件頁面。",
+    "fields": []
+  },
+  {
+    "code": "scene_text",
+    "label": "標示／畫面文字",
+    "criteria": "招牌、產品標籤、菜單、海報、螢幕截圖或場景中的文字。",
+    "fields": []
+  },
+  {
+    "code": "other",
+    "label": "其他影像",
+    "criteria": "不屬於上述類型、類型不明、同時出現多種類型或沒有清晰文字的影像。",
+    "fields": []
+  }
+]

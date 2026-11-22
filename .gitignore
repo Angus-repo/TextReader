@@ -1,0 +1,11 @@
+.gradle/
+build/
+local.properties
+*.p12
+*.jks
+*.password
+*-password.txt
+signing/
+.env
+.idea/
+*.iml
