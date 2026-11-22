@@ -169,10 +169,11 @@ final class OcrRows {
                 labels.addAll(Arrays.asList("父", "母", "配偶", "住址"));
                 return true;
             case "dl_front":
-                labels.addAll(Arrays.asList("住址", "持照條件", "管轄編號", "管制編號"));
+                labels.addAll(Arrays.asList("住址", "地址", "持照條件", "管轄編號", "管制編號", "駕照號碼", "駕駛執照號碼",
+                        "姓名", "性別", "駕照種類", "車種", "出生日期", "出生年月日", "有效日期", "發照日期", "審驗日期"));
                 return true;
             case "dl_back":
-                labels.addAll(Arrays.asList("住所變更", "登記機關"));
+                labels.addAll(Arrays.asList("印製號碼", "動員編號", "備註", "住所變更", "住址變更", "登記機關", "登記機關章戳", "職業駕駛審驗", "加註條件"));
                 return true;
             case "nhi_front":
                 return true;

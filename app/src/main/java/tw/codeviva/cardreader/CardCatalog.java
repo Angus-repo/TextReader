@@ -91,13 +91,40 @@ final class CardCatalog {
         LinkedHashMap<String, Card> next = new LinkedHashMap<>(defaults);
         for (String code : new TreeSet<>(preferences.getAll().keySet())) {
             JSONObject json = new JSONObject(preferences.getString(code, ""));
-            Card card = new Card(json);
-            next.put(code, card);
+            if (LicenseFields.supports(code) && previousFactoryFields(json.getJSONArray("fields")))
+                json.put("fields", defaults.get(code).fields);
+            next.put(code, new Card(json));
         }
         Card fallback = next.remove(OTHER);
         next.put(OTHER, fallback);
         cards.clear();
         cards.putAll(next);
+    }
+
+    // Older releases also saved all default fields when only the name, classifier or auto-read
+    // switch changed. Match the exact shipped keys, labels, descriptions and order before upgrading.
+    private static boolean previousFactoryFields(JSONArray fields) throws JSONException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (int i = 0; i < fields.length(); i++) {
+                JSONObject field = fields.getJSONObject(i);
+                for (String property : Arrays.asList("key", "label", "description")) {
+                    digest.update(field.getString(property).getBytes(StandardCharsets.UTF_8));
+                    digest.update((byte) 0);
+                }
+            }
+            String fingerprint = String.format(Locale.ROOT, "%064x", new java.math.BigInteger(1, digest.digest()));
+            // The three previously released revisions of document-types.json, front / back.
+            return Arrays.asList(
+                "33ddd625b007818d09849da37a35f0f3ff78b4f0d85e8e0248e4a77a5d8e7758",
+                "845250922eaa57e51027aba8a160d8448c1b03509ee7df1087f0ac3e58203f66",
+                "e0d19e513adab8df56deef25681607f67ce3ef55adee58d04764123b61a53b56",
+                "d243d416117c5a953a4d83cfa82dd64b5bb0371c375cedbfde21d0631c82d294",
+                "e5ffb4dba29e4e787c11e2571363d160fbc851e98a219151c5188cded79fd126",
+                "ac6eee9228c4079231426ed37c89c41a567a04e5faa65f5ea42beb351a24fc70").contains(fingerprint);
+        } catch (NoSuchAlgorithmException unavailable) {
+            throw new AssertionError(unavailable);
+        }
     }
 
     Collection<Card> builtInTemplates() {

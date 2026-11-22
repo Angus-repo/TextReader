@@ -41,9 +41,13 @@ final class ResultLayout {
         List<Row> rows = new ArrayList<>();
         List<String> missing = new ArrayList<>();
         boolean nhi = reading.type.code.equals("nhi_front");
+        boolean license = LicenseFields.supports(reading.type.code);
+        JSONObject cells = reading.local.optJSONObject("LicenseCells");
+        JSONObject blankCells = reading.local.optJSONObject("LicenseBlankCells");
+        java.util.Map<String,String> licenseLabels = license ? LicenseFields.labeled(reading.type, displayText) : null;
         boolean front = reading.type.code.equals("id_front"), back = reading.type.code.equals("id_back");
         String sexLabel = front ? reading.type.fieldLabel("Sex") : null;
-        String idLabel = back ? IdCardDetails.ID_LABEL : (front ? reading.type.fieldLabel("IdNumber") : null);
+        String idLabel = front ? reading.type.fieldLabel("IdNumber") : null;
         String serviceLabel = back ? reading.type.fieldLabel("MilitaryService") : null;
         String serialLabel = back ? reading.type.fieldLabel("Serial") : null;
         String deviceNote = null;
@@ -55,13 +59,18 @@ final class ResultLayout {
             JSONObject definition = reading.type.fields.optJSONObject(i);
             String label = definition.optString("label");
             String key = definition.optString("key");
-            if (back && (IdCardDetails.ID_LABEL.equals(label) || IdCardDetails.BARCODE_LABEL.equals(label))) {
+            if (back && (backBarcodeLabel(label) || "IdNumber".equals(key) || "Barcode".equals(key))) {
                 // These reserved rows use only a decoded payload, including on older custom rules.
                 definedFields--;
                 continue;
             }
+            if (license && blankCells != null && blankCells.optBoolean(key)) {
+                rows.add(new Row(label, "", Double.NaN));
+                continue;
+            }
             JSONObject field = reading.fields == null ? null : reading.fields.optJSONObject(key);
             String value = IdCardDetails.cloudValue(reading, key);
+            if (license) value = LicenseFields.clean(key,value);
             if (front && "Sex".equals(key)) value = IdCardDetails.sexValue(value);
             if (front && "IdNumber".equals(key)) value = IdCardDetails.idNumber(value);
             if (back && "MilitaryService".equals(key)) value = IdCardDetails.serviceValue(value);
@@ -69,6 +78,16 @@ final class ResultLayout {
             if (!value.isEmpty()) {
                 rows.add(new Row(label, value, field.optDouble("confidence")));
                 cloudValues++;
+                continue;
+            }
+            if (license) {
+                String fromImage = LicenseFields.positioned(cells,key);
+                if (!fromImage.isEmpty()) usedImage = true;
+                // When the actual table was read, an empty physical cell must stay empty.
+                String resolved = fromImage;
+                if (resolved.isEmpty() && (cells == null || !cells.has(key) || key.equals("Authority")))
+                    resolved = LicenseFields.fromLabels(licenseLabels,key,label,displayText);
+                rows.add(new Row(label,resolved,Double.NaN));
                 continue;
             }
             if (nhi) {
@@ -81,13 +100,14 @@ final class ResultLayout {
             }
             if (reading.fields != null || nhi) missing.add(label);
         }
-        if (!nhi && rows.isEmpty()) {
+        if (!nhi && !license && rows.isEmpty()) {
             rows = OcrRows.from(reading.type, displayText);
             // Resolve these labels below, even when cloud extraction returned other fields.
             if (front) rows.removeIf(row -> "性別".equals(row.label) || row.label.equals(sexLabel)
                     || "統一編號".equals(row.label) || "身分證字號".equals(row.label) || row.label.equals(idLabel));
             if (back) rows.removeIf(row -> "役別".equals(row.label) || row.label.equals(serviceLabel)
-                    || row.label.equals(serialLabel) || IdCardDetails.ID_LABEL.equals(row.label) || IdCardDetails.BARCODE_LABEL.equals(row.label));
+                    || row.label.equals(serialLabel) || backBarcodeLabel(row.label)
+                    || row.label.equals(reading.type.fieldLabel("IdNumber")) || row.label.equals(reading.type.fieldLabel("Barcode")));
             for (Row row : rows) missing.remove(row.label);
         }
 
@@ -105,13 +125,26 @@ final class ResultLayout {
             }
         }
         if (idLabel != null && uniqueRow(rows, idLabel) == null) {
-            String id = back ? IdCardDetails.barcodeId(reading.local.optString("Barcode")) : IdCardDetails.idNumber(displayText);
-            if (front && id.isEmpty()) {
+            String id = IdCardDetails.idNumber(displayText);
+            if (id.isEmpty()) {
                 id = IdCardDetails.idNumber(reading.local.optString("IdNumber"));
                 usedImage |= !id.isEmpty();
             }
             rows.add(new Row(idLabel, id.isEmpty() ? null : id, Double.NaN));
             missing.remove(idLabel);
+        }
+        if (back) {
+            String barcode = reading.local.isNull("Barcode") ? "" : reading.local.optString("Barcode");
+            int at = 0;
+            while (at < rows.size() && !rows.get(at).label.equals(serviceLabel) && !rows.get(at).label.equals(serialLabel)) at++;
+            rows.add(at, new Row(IdCardDetails.BARCODE_LABEL, barcode.isEmpty() ? null : barcode, Double.NaN));
+            if (!barcode.isEmpty()) {
+                usedImage = true;
+            } else if (reading.local.has("Barcode")) {
+                deviceNote = "左下角條碼未能解碼，請近拍同一張證件，讓完整條紋與兩側留白一起入框。";
+            } else {
+                deviceNote = "這筆紀錄沒有條碼資料，可補掃同一張證件的左下角。";
+            }
         }
         if (serviceLabel != null && uniqueRow(rows, serviceLabel) == null) {
             String service = IdCardDetails.militaryService(displayText);
@@ -133,17 +166,6 @@ final class ResultLayout {
                 missing.remove(serialLabel);
             }
         }
-        if (back) {
-            String barcode = reading.local.optString("Barcode");
-            rows.add(new Row(IdCardDetails.BARCODE_LABEL, barcode.isEmpty() ? null : barcode, Double.NaN));
-            if (!barcode.isEmpty()) {
-                usedImage = true;
-            } else if (reading.local.has("Barcode")) {
-                deviceNote = "左下角條碼未能解碼，請近拍同一張證件，讓完整條紋與兩側留白一起入框。";
-            } else {
-                deviceNote = "這筆紀錄沒有條碼資料，可補掃同一張證件的左下角。";
-            }
-        }
 
         LinearLayout card = ui.panel();
         page.addView(card);
@@ -154,8 +176,8 @@ final class ResultLayout {
         ui.weight(header, heading);
         int filled = 0;
         for (Row row : rows) if (row.value != null && !row.value.isEmpty()) filled++;
-        if (cloudValues > 0 || nhi) {
-            header.addView(ui.text("已讀取 " + filled + " / " + (definedFields + (back ? 2 : 0)), 13, MUTED, false));
+        if (cloudValues > 0 || nhi || license) {
+            header.addView(ui.text("已讀取 " + filled + " / " + (definedFields + (back ? 1 : 0)), 13, MUTED, false));
         }
         ui.gap(card, 8);
         if (rows.isEmpty()) {
@@ -189,6 +211,10 @@ final class ResultLayout {
         }
         ui.gap(page, 12);
         addTranscript(reading.type.label, displayText, rows);
+    }
+
+    private static boolean backBarcodeLabel(String label) {
+        return IdCardDetails.BARCODE_LABEL.equals(label) || IdCardDetails.ID_LABEL.equals(label) || "左下角條碼".equals(label);
     }
 
     private static Row uniqueRow(List<Row> rows, String label) {

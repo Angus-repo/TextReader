@@ -371,7 +371,8 @@ public class MainActivity extends Activity {
                 }
             }));
             if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
-            IdCardDetails.readImage(this, reading, bytes);
+            if (LicenseFields.supports(type.code)) LicenseFields.readImage(this, reading, bytes);
+            else IdCardDetails.readImage(this, reading, bytes);
             if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
             reading.usage = api.usage.snapshot();
             try {

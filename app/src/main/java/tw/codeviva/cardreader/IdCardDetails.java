@@ -23,7 +23,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class IdCardDetails {
-    static final String BARCODE_LABEL = "左下角條碼";
+    static final String BARCODE_LABEL = "條碼";
     private static final String SPACE = "[\\s\\p{Z}]*";
     private static final Pattern SEX_LABEL = Pattern.compile("性" + SPACE + "[別别]");
     private static final Pattern LABELED_SEX = Pattern.compile(SEX_LABEL.pattern() + SPACE + "[:：]?" + SPACE
@@ -42,11 +42,6 @@ final class IdCardDetails {
 
     static String idNumber(String text) {
         return uniqueNumber(ID, text);
-    }
-
-    static String barcodeId(String barcode) {
-        String compact = Normalizer.normalize(barcode, Normalizer.Form.NFKC).replaceAll("[\\s\\p{Z}]+", "").toUpperCase(Locale.ROOT);
-        return compact.matches("[A-Z][0-9]{9}") ? compact : "";
     }
 
     static String serial(String text) {

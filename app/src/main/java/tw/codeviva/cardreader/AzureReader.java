@@ -248,6 +248,7 @@ final class AzureReader {
         final JSONObject local;
         final double pageAngle;
         JSONObject usage;
+        JSONObject licensePage; // Geometry during this scan only. The history stores the resolved cells.
 
         Reading(CardCatalog.Card type, String text, JSONObject fields) {
             this(type, text, fields, new JSONObject(), 0);
@@ -298,8 +299,10 @@ final class AzureReader {
         double angle = page == null ? 0 : page.optDouble("angle", 0);
         JSONObject details = new JSONObject();
         if (type.code.equals("id_back")) details.put("Barcode", PageBarcode.lowerLeft(page));
-        return new Reading(type, String.join("\n\n", blocks), structured && fields == null ? new JSONObject() : fields,
+        Reading reading = new Reading(type, String.join("\n\n", blocks), structured && fields == null ? new JSONObject() : fields,
                 details, angle);
+        if (LicenseFields.supports(type.code)) reading.licensePage = page;
+        return reading;
     }
 
     private static String contentText(JSONObject content) {

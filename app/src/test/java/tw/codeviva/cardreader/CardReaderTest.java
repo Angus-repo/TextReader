@@ -160,7 +160,7 @@ public class CardReaderTest {
                 assertNull(find(root,"補掃左下角條碼"));
                 JSONObject fields = new JSONObject(((TextView)root.findViewWithTag("transcript-json"))
                         .getText().toString()).getJSONObject("欄位");
-                assertEquals("R012340000",fields.getString("身分證字號"));
+                assertFalse(fields.has("身分證字號"));
                 assertEquals("R012340000",fields.getString(IdCardDetails.BARCODE_LABEL));
                 assertEquals("0000000105",fields.getString("證件流水號"));
                 assertEquals(back.usage.toString(),store.get(target).usage.toString());
@@ -507,21 +507,145 @@ public class CardReaderTest {
         }
     }
 
-    @Test public void backSeparatesIdBarcodeAndSerialAndKeepsBlankMilitaryFieldInHistoryAndJson() throws Exception {
+    private static JSONObject licenseJson(CardCatalog.Card type, AzureReader.Reading reading) throws Exception {
+        ReaderScreen ui = new ReaderScreen(RuntimeEnvironment.getApplication());
+        LinearLayout page = ui.col();
+        new ResultLayout(ui,page).show(reading);
+        JSONObject fields = new JSONObject(((TextView)page.findViewWithTag("transcript-json")).getText().toString()).getJSONObject("欄位");
+        assertEquals(type.fields.length(),fields.length());
+        List<String> order = new ArrayList<>();
+        fields.keys().forEachRemaining(order::add);
+        for (int i=0; i<type.fields.length(); i++) {
+            String name = type.fields.getJSONObject(i).getString("label");
+            assertNotNull(name,find(page,name));
+            assertEquals(name,order.get(i));
+            assertTrue(fields.get(name) instanceof String);
+        }
+        return fields;
+    }
+
+    @Test public void licensesKeepAllConfiguredFieldsBlankAcrossTextStructuredAndHistoricalResults() throws Exception {
+        for (String code : new String[]{"dl_front","dl_back"}) {
+            CardCatalog.Card type = catalog.cards.get(code);
+            assertEquals(code.equals("dl_front") ? 12 : 16,type.fields.length());
+            for (JSONObject extraction : new JSONObject[]{null,new JSONObject()}) {
+                AzureReader.Reading read = new AzureReader.Reading(type,"",extraction);
+                JSONObject fields = licenseJson(type,read);
+                for (Iterator<String> it=fields.keys(); it.hasNext();) assertEquals("",fields.getString(it.next()));
+            }
+        }
+        CardCatalog.Card type = catalog.cards.get("dl_front");
+        AzureReader.Reading read = new AzureReader.Reading(type,"駕照號碼 Q123400067\n性別 女\n發照日期 099.01.03\n審驗日期",
+                obj("Name",obj("valueString","林甲")));
+        try (ReadingHistory db = new ReadingHistory(RuntimeEnvironment.getApplication())) {
+            JSONObject fields = licenseJson(type,db.get(db.add(read)));
+            assertEquals("林甲",fields.getString("姓名"));
+            assertEquals("Q123400067",fields.getString("駕照號碼"));
+            assertEquals("099.01.03",fields.getString("發照日期"));
+            assertEquals("",fields.getString("審驗日期"));
+        }
+        assertEquals("",LicenseFields.clean("Conditions","C 加註條件： 【樣 張】"));
+    }
+
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    public void rotatedLicenseBackUsesWordGeometryAndKeepsEachBlankRowInPlace() throws Exception {
+        int w=900,h=630,l=60,t=50,gw=750,gh=525;
+        android.graphics.Bitmap b = android.graphics.Bitmap.createBitmap(w,h,android.graphics.Bitmap.Config.ARGB_8888);
+        b.eraseColor(android.graphics.Color.WHITE);
+        android.graphics.Canvas c = new android.graphics.Canvas(b);
+        android.graphics.Paint p = new android.graphics.Paint(); p.setColor(android.graphics.Color.BLACK); p.setStrokeWidth(3);
+        for (double y : new double[]{0,.153,.249,.447,.543,.638,.722,.815,.907,1})
+            c.drawLine(l,t+(float)y*gh,l+gw,t+(float)y*gh,p);
+        c.drawLine(l,t,l,t+gh,p); c.drawLine(l+gw,t,l+gw,t+gh,p);
+        Map<String,String> printed = new LinkedHashMap<>();
+        printed.put("PrintNumber","000321"); printed.put("ConditionA","A無限制"); printed.put("ConditionB","B自動排檔");
+        printed.put("Conditions","C加註條件：樣張"); printed.put("AddressChange2","測試路二號");
+        printed.put("AddressStamp2","甲所"); printed.put("ReviewRecord2","112.07.10"); printed.put("ReviewStamp2","乙所");
+        JSONArray words = new JSONArray();
+        for (LicenseFields.Cell cell : LicenseFields.BACK) {
+            String v = printed.get(cell.key); if (v == null) continue;
+            int x=l+Math.round(gw*(cell.l+cell.r)/2), y=t+Math.round(gh*(cell.t+cell.b)/2);
+            c.drawRect(x-9,y-5,x+9,y+5,p);
+            String box = String.format(Locale.ROOT,"D(1,%d,%d,%d,%d,%d,%d,%d,%d)",
+                    h-y+5,x-9,h-y+5,x+9,h-y-5,x+9,h-y-5,x-9);
+            words.put(obj("content",v,"source",box));
+        }
+        android.graphics.Matrix matrix = new android.graphics.Matrix(); matrix.setRotate(90);
+        android.graphics.Bitmap rotated = android.graphics.Bitmap.createBitmap(b,0,0,w,h,matrix,true);
+        try (ReadingHistory db = new ReadingHistory(RuntimeEnvironment.getApplication())) {
+            JSONObject page = obj("pageNumber",1,"angle",90,"width",h,"height",w,"words",words);
+            JSONObject body = obj("result",obj("contents",new JSONArray().put(obj("pages",new JSONArray().put(page),
+                    "fields",obj("Mobilization",obj("valueString","000321"))))));
+            AzureReader api = new AzureReader(catalog,config,(m,u,hdr,k,data)->reply(200,null,body),ms->{});
+            CardCatalog.Card type = catalog.cards.get("dl_back");
+            byte[] photo = CardPhoto.encoded(rotated,android.graphics.Bitmap.CompressFormat.JPEG,94);
+            AzureReader.Reading read = api.read(type,photo,true,msg->{});
+            assertEquals("000321", read.fields.getJSONObject("Mobilization").getString("valueString"));
+            LicenseFields.readImage(RuntimeEnvironment.getApplication(),read,photo);
+            JSONObject result = licenseJson(type,db.get(db.add(read)));
+            assertEquals("000321",result.getString("印製號碼"));
+            assertEquals("",result.getString("動員編號"));
+            assertEquals("無限制",result.getString("持照條件 A"));
+            assertEquals("自動排檔",result.getString("持照條件 B"));
+            assertEquals("",result.getString("C 加註條件"));
+            assertEquals("",result.getString("住址變更 1"));
+            assertEquals("測試路二號",result.getString("住址變更 2"));
+            assertEquals("甲所",result.getString("住址變更 2 登記機關章戳"));
+            assertEquals("",result.getString("住址變更 3"));
+            assertEquals("",result.getString("職業駕駛審驗 1"));
+            assertEquals("112.07.10",result.getString("職業駕駛審驗 2"));
+            assertEquals("乙所",result.getString("職業駕駛審驗 2 登記機關章戳"));
+            assertEquals("",result.getString("備註"));
+        } finally { rotated.recycle(); b.recycle(); }
+    }
+
+    @Test public void upgradesUntouchedDriverFieldTemplatesAndPreservesEditedDefinitions() throws Exception {
+        JSONArray saved = new JSONArray();
+        saved.put(obj("key", "PrintNumber", "label", "印製號碼", "description", "印製號碼，包含括號及前綴。"));
+        saved.put(obj("key", "Mobilization", "label", "動員編號", "description", "已填寫的動員編號。"));
+        saved.put(obj("key", "Conditions", "label", "持照條件加註", "description", "僅擷取已填寫、勾選或加註的個別條件，勿將通用 A/B/C 圖例當成個人限制。"));
+        saved.put(obj("key", "ChangeOfAddress", "label", "住所變更", "description", "實際登記的住所變更。"));
+        saved.put(obj("key", "Registration", "label", "登記機關及日期", "description", "已填寫的登記機關與年月日。"));
+        saved.put(obj("key", "Records", "label", "審驗或紀錄", "description", "職業駕駛審驗或其他已填寫紀錄。"));
+        saved.put(obj("key", "Notes", "label", "備註", "description", "已填寫的個人備註。"));
+        catalog.save("dl_back", "自訂背面", "我的分類描述", saved, true);
+        CardCatalog.Card upgraded = new CardCatalog(RuntimeEnvironment.getApplication()).cards.get("dl_back");
+        assertEquals(16, upgraded.fields.length());
+        assertEquals("我的分類描述", upgraded.criteria);
+        assertEquals("自訂背面", upgraded.label);
+        assertTrue(upgraded.autoFields);
+        saved.getJSONObject(0).put("description", "自訂讀取說明");
+        catalog.save("dl_back", upgraded.label, upgraded.criteria, saved, true);
+        assertEquals(saved.toString(), catalog.cards.get("dl_back").fields.toString());
+    }
+
+    @Test public void renamedLicenseFieldsAndOldCombinedRulesRetainTheirKeysAndValues() throws Exception {
+        JSONArray definitions = new JSONArray().put(obj("key","Records","label","我的審驗紀錄","description","登載日期"))
+                .put(obj("key","Notes","label","備註","description","附註"));
+        CardCatalog.Card type = new CardCatalog.Card(obj("code","dl_back","label","駕照背面","criteria","測試","fields",definitions));
+        AzureReader.Reading read = new AzureReader.Reading(type,"",null);
+        read.local.put("LicenseCells",obj("ReviewRecord1","110.01.02","ReviewRecord2","111.01.03"));
+        JSONObject fields = licenseJson(type,read);
+        assertEquals("110.01.02\n111.01.03",fields.getString("我的審驗紀錄"));
+        assertEquals("",fields.getString("備註"));
+    }
+
+    @Test public void backUsesSingleRawBarcodeAndSeparateSerialAndKeepsBlankMilitaryFieldInHistoryAndJson() throws Exception {
         assertEquals("常備兵役", IdCardDetails.militaryService("配偶 張甲　役 別：常備兵役\n出生地 臺中市"));
         assertEquals("替代役", IdCardDetails.militaryService("役\n別\n替代役\n住址"));
         assertEquals("", IdCardDetails.militaryService("役別　樣本\n出生地 臺中市"));
         assertEquals("", IdCardDetails.militaryService("役別\n臺中市"));
         try (ActivityController<MainActivity> ctl = Robolectric.buildActivity(MainActivity.class).setup();
              ReadingHistory db = new ReadingHistory(ctl.get())) {
-            for (String barcode : new String[]{"B212300007", "0000000105", ""}) {
+            for (String barcode : new String[]{"B212300007", "0000000105", "579246", "000043", ""}) {
                 AzureReader.Reading back = new AzureReader.Reading(catalog.cards.get("id_back"),
                         "配偶 張甲　役別\n出生地 臺中市\n0000000105", obj("Spouse", obj("valueString", "張甲")));
                 back.local.put("Barcode", barcode);
                 ReaderScreen ui = new ReaderScreen(ctl.get());
                 LinearLayout page = ui.col();
                 new ResultLayout(ui, page).show(db.get(db.add(back)));
-                assertNotNull(find(page, "身分證字號"));
+                assertNull(find(page, "身分證字號"));
+                assertNull(find(page, "左下角條碼"));
                 assertNotNull(find(page, "役別"));
                 JSONObject fields = new JSONObject(((TextView)page.findViewWithTag("transcript-json")).getText().toString()).getJSONObject("欄位");
                 assertEquals("", fields.getString("役別"));
@@ -529,8 +653,8 @@ public class CardReaderTest {
                 assertTrue(fields.has(IdCardDetails.BARCODE_LABEL));
                 if (barcode.isEmpty()) assertTrue(fields.isNull(IdCardDetails.BARCODE_LABEL));
                 else assertEquals(barcode, fields.getString(IdCardDetails.BARCODE_LABEL));
-                if (barcode.startsWith("B")) assertEquals(barcode, fields.getString("身分證字號"));
-                else { assertTrue(fields.has("身分證字號")); assertTrue(fields.isNull("身分證字號")); }
+                assertFalse(fields.has("身分證字號"));
+                assertFalse(fields.has("左下角條碼"));
             }
             AzureReader.Reading old = new AzureReader.Reading(catalog.cards.get("id_back"), "役別 免役", null);
             LinearLayout page = new ReaderScreen(ctl.get()).col();
@@ -591,7 +715,7 @@ public class CardReaderTest {
             LinearLayout page = ui.col();
             new ResultLayout(ui, page).show(reading);
             JSONObject fields = new JSONObject(((TextView)page.findViewWithTag("transcript-json")).getText().toString()).getJSONObject("欄位");
-            assertEquals(number, fields.getString("身分證字號"));
+            assertFalse(fields.has("身分證字號"));
             assertEquals(number, fields.getString(IdCardDetails.BARCODE_LABEL));
             assertEquals("常備兵役", fields.getString("役別"));
             assertEquals("0000000105", fields.getString("證件流水號"));
@@ -1123,7 +1247,7 @@ public class CardReaderTest {
                 fieldCount++;
             }
         }
-        assertEquals(63, fieldCount);
+        assertEquals(72, fieldCount);
         try (ActivityController<MainActivity> controller = Robolectric.buildActivity(MainActivity.class).setup()) {
             View root = controller.get().findViewById(android.R.id.content);
             find(root, "辨識規則").performClick();
