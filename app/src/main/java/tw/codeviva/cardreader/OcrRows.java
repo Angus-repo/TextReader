@@ -3,6 +3,10 @@ package tw.codeviva.cardreader;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Locale;
+import org.json.JSONObject;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -14,6 +18,11 @@ final class OcrRows {
     private static final Pattern EDGE_SPACE = Pattern.compile("^" + SPACE + "+|" + SPACE + "+$");
 
     private static final Pattern ADDRESS_PART = Pattern.compile(".*[鄉鎮區村里鄰路街段巷弄號樓室].*");
+
+    private static final Pattern NHI_ID = Pattern.compile("(?:[A-Za-z][0-9]{9}|[A-Za-z]{2}[0-9]{8})");
+    private static final Pattern NHI_BIRTH = Pattern.compile("[0-9]{1,4}([./-])(?:0?[1-9]|1[0-2])\\1(?:0?[1-9]|[12][0-9]|3[01])");
+    private static final Pattern NHI_NUMBER = Pattern.compile("[0-9]{4}(?:" + SPACE + "*[0-9]{4}){2}");
+    private static final Pattern NAME_TEXT = Pattern.compile("[\\p{L}][\\p{L}\\p{M} ·・‧．.'’-]*");
 
     static List<ResultLayout.Row> from(CardCatalog.Card card, String text) {
         Set<String> labels = new LinkedHashSet<>();
@@ -30,7 +39,7 @@ final class OcrRows {
         // General prose needs a colon. On ID cards a label may occupy a cell on its own.
         String delimiter = identityCard ? "(?=[\\s　:：]|$)" + SPACE + "*[:：]?" : SPACE + "*[:：]";
         Pattern header = Pattern.compile("(?<![^\\s　])(" + String.join("|", alternatives) + ")" + delimiter + SPACE + "*");
-        String[] lines = text.split("\\r?\\n");
+        String[] lines = text.split("\\r\\n|\\r|\\n");
         for (int i = 0; i < lines.length; i++) lines[i] = EDGE_SPACE.matcher(lines[i]).replaceAll("");
         for (int i = 0; i < lines.length; i++) {
             String line = lines[i];
@@ -86,7 +95,55 @@ final class OcrRows {
             }
             add(rows, label, value);
         }
+        if (card.code.equals("nhi_front")) addUnlabeledNhiFields(card, lines, rows);
         return rows;
+    }
+
+    // NHI cards print the name immediately above the ID. Other values have distinct printed formats.
+    private static void addUnlabeledNhiFields(CardCatalog.Card card, String[] lines, List<ResultLayout.Row> rows) {
+        Map<String, Set<String>> candidates = new LinkedHashMap<>();
+        String previous = "";
+        for (String line : lines) {
+            if (line.isEmpty()) continue;
+            if (NHI_ID.matcher(line).matches()) {
+                remember(candidates, "IdNumber", line);
+                if (looksLikeNhiName(previous, card)) remember(candidates, "Name", previous);
+            } else if (NHI_BIRTH.matcher(line).matches()) {
+                remember(candidates, "BirthDate", line);
+            } else if (NHI_NUMBER.matcher(line).matches()) {
+                remember(candidates, "NhiCardNumber", line.replaceAll(SPACE + "+", ""));
+            }
+            previous = line;
+        }
+
+        // Map by the saved rule key so renamed labels work and removed fields stay removed.
+        Set<String> printed = new LinkedHashSet<>();
+        for (ResultLayout.Row row : rows) printed.add(row.label);
+        for (int i = 0; i < card.fields.length(); i++) {
+            JSONObject field = card.fields.optJSONObject(i);
+            String key = field.optString("key");
+            String label = field.optString("label");
+            Set<String> matches = candidates.get(key);
+            if (printed.contains(label) || matches == null || matches.size() != 1) continue;
+            if (key.equals("Name") && candidates.get("IdNumber").size() != 1) continue;
+            add(rows, label, matches.iterator().next());
+        }
+    }
+
+    private static void remember(Map<String, Set<String>> candidates, String key, String value) {
+        candidates.computeIfAbsent(key, unused -> new LinkedHashSet<>()).add(value);
+    }
+
+    private static boolean looksLikeNhiName(String text, CardCatalog.Card card) {
+        if (!NAME_TEXT.matcher(text).matches()) return false;
+        String compact = text.replaceAll(SPACE + "+", "").toUpperCase(Locale.ROOT);
+        if (compact.length() < 2 || compact.contains("健康保險") || compact.contains("HEALTH")
+                || compact.contains("INSURANCE") || compact.equals("NATIONAL") || compact.equals("健保卡")
+                || compact.equals("樣本") || compact.equals("樣張") || compact.equals("SAMPLE")) return false;
+        for (int i = 0; i < card.fields.length(); i++) {
+            if (text.equals(card.fields.optJSONObject(i).optString("label"))) return false;
+        }
+        return true;
     }
 
     private static void add(List<ResultLayout.Row> rows, String label, String text) {

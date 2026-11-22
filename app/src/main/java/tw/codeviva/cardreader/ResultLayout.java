@@ -37,48 +37,75 @@ final class ResultLayout {
 
         List<Row> rows = new ArrayList<>();
         List<String> missing = new ArrayList<>();
-        if (reading.fields != null) {
-            for (int i = 0; i < reading.type.fields.length(); i++) {
-                JSONObject definition = reading.type.fields.optJSONObject(i);
-                JSONObject field = reading.fields.optJSONObject(definition.optString("key"));
-                String value = field == null || field.isNull("valueString") ? "" : field.optString("valueString").trim();
-                double confidence = field == null ? Double.NaN : field.optDouble("confidence");
-                String label = definition.optString("label");
-                if (value.isEmpty()) missing.add(label);
-                else rows.add(new Row(label, value, confidence));
+        boolean nhi = reading.type.code.equals("nhi_front");
+        List<Row> local = null;
+        int cloudValues = 0;
+        for (int i = 0; i < reading.type.fields.length(); i++) {
+            JSONObject definition = reading.type.fields.optJSONObject(i);
+            String label = definition.optString("label");
+            JSONObject field = reading.fields == null ? null : reading.fields.optJSONObject(definition.optString("key"));
+            String value = field == null || field.isNull("valueString") ? "" : field.optString("valueString").trim();
+            if (!value.isEmpty()) {
+                rows.add(new Row(label, value, field.optDouble("confidence")));
+                cloudValues++;
+                continue;
             }
+            if (nhi) {
+                if (local == null) local = OcrRows.from(reading.type, reading.text);
+                Row candidate = uniqueRow(local, label);
+                if (candidate != null) {
+                    rows.add(candidate);
+                    continue;
+                }
+            }
+            if (reading.fields != null || nhi) missing.add(label);
         }
-        boolean extracted = !rows.isEmpty();
-        if (!extracted) rows = OcrRows.from(reading.type, reading.text);
+        if (!nhi && rows.isEmpty()) {
+            rows = OcrRows.from(reading.type, reading.text);
+            for (Row row : rows) missing.remove(row.label);
+        }
 
-        if (rows.isEmpty()) addTranscript(reading, rows, false);
-        if (!rows.isEmpty() || !missing.isEmpty()) {
-            if (rows.isEmpty()) ui.gap(page, 12);
-            LinearLayout card = ui.panel();
-            page.addView(card);
-            LinearLayout header = ui.row();
-            card.addView(header);
-            TextView heading = ui.text(extracted || rows.isEmpty() ? "擷取欄位" : "依原文整理", 17, GREEN, true);
-            heading.setAccessibilityHeading(true);
-            ui.weight(header, heading);
-            if (extracted) header.addView(ui.text("已讀取 " + rows.size() + " / " + reading.type.fields.length(), 13, MUTED, false));
-            ui.gap(card, 8);
-            for (Row row : rows) {
-                ui.line(card);
-                addRow(card, row);
-            }
-            if (!missing.isEmpty()) {
-                ui.line(card);
-                ui.gap(card, 10);
-                card.addView(ui.text(extracted ? "未讀取" : "欄位擷取未讀取", 13, MUTED, true));
-                ui.gap(card, 4);
-                card.addView(ui.text(String.join("、", missing), 14, MUTED, false));
-            }
+        LinearLayout card = ui.panel();
+        page.addView(card);
+        LinearLayout header = ui.row();
+        card.addView(header);
+        TextView heading = ui.text("欄位結果", 17, GREEN, true);
+        heading.setAccessibilityHeading(true);
+        ui.weight(header, heading);
+        if (cloudValues > 0 || nhi) {
+            header.addView(ui.text("已讀取 " + rows.size() + " / " + reading.type.fields.length(), 13, MUTED, false));
         }
-        if (!rows.isEmpty()) {
-            ui.gap(page, 12);
-            addTranscript(reading, rows, true);
+        ui.gap(card, 8);
+        if (rows.isEmpty()) {
+            String message = reading.text.isEmpty() ? "這張影像未讀到文字。" : "未辨識出可對應的欄位，可展開下方 JSON 查看原文。";
+            card.addView(ui.text(message, 14, MUTED, false));
+        } else if (rows.size() > cloudValues) {
+            card.addView(ui.text(cloudValues == 0 ? "依原文整理" : "部分欄位依原文整理", 13, MUTED, false));
+            ui.gap(card, 6);
         }
+        for (Row row : rows) {
+            ui.line(card);
+            addRow(card, row);
+        }
+        if (!missing.isEmpty()) {
+            ui.line(card);
+            ui.gap(card, 10);
+            card.addView(ui.text("未讀取", 13, MUTED, true));
+            ui.gap(card, 4);
+            card.addView(ui.text(String.join("、", missing), 14, MUTED, false));
+        }
+        ui.gap(page, 12);
+        addTranscript(reading, rows);
+    }
+
+    private static Row uniqueRow(List<Row> rows, String label) {
+        Row match = null;
+        for (Row row : rows) {
+            if (!label.equals(row.label)) continue;
+            if (match != null && !match.value.equals(row.value)) return null;
+            match = row;
+        }
+        return match;
     }
 
     static final class Row {
@@ -148,7 +175,7 @@ final class ResultLayout {
         }
     }
 
-    private void addTranscript(AzureReader.Reading reading, List<Row> rows, boolean collapsible) {
+    private void addTranscript(AzureReader.Reading reading, List<Row> rows) {
         LinearLayout panel = ui.panel();
         page.addView(panel);
         LinearLayout header = ui.row();
@@ -158,24 +185,18 @@ final class ResultLayout {
         ui.weight(header, title);
         String json = transcriptJson(reading, rows);
         LinearLayout details = ui.col();
-        if (collapsible) {
-            Button toggle = ui.action("展開", false, v -> {
-                boolean expand = details.getVisibility() == View.GONE;
-                details.setVisibility(expand ? View.VISIBLE : View.GONE);
-                Button button = (Button) v;
-                button.setText(expand ? "收合" : "展開");
-                button.setContentDescription(expand ? "收合辨識原文 JSON" : "展開辨識原文 JSON");
-            });
-            toggle.setContentDescription("展開辨識原文 JSON");
-            header.addView(toggle);
-            details.setVisibility(View.GONE);
-        }
+        Button toggle = ui.action("展開", false, v -> {
+            boolean expand = details.getVisibility() == View.GONE;
+            details.setVisibility(expand ? View.VISIBLE : View.GONE);
+            Button button = (Button) v;
+            button.setText(expand ? "收合" : "展開");
+            button.setContentDescription(expand ? "收合辨識原文 JSON" : "展開辨識原文 JSON");
+        });
+        toggle.setContentDescription("展開辨識原文 JSON");
+        header.addView(toggle);
+        details.setVisibility(View.GONE);
         panel.addView(details);
         ui.gap(details, 10);
-        if (reading.text.isEmpty()) {
-            details.addView(ui.text("這張影像未讀到文字。", 14, MUTED, false));
-            ui.gap(details, 6);
-        }
         TextView body = ui.text(json, 14, INK, false);
         body.setTypeface(Typeface.MONOSPACE);
         body.setTextIsSelectable(true);

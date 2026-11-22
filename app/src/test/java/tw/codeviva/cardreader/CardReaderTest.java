@@ -125,6 +125,60 @@ public class CardReaderTest {
             a.onBackPressed();assertNotNull(find(root,"1 筆"));
         }
     }
+    @Test public void savedUnlabeledNhiShowsFourFieldsAboveMatchingJson() throws Exception {
+        String[] lines = {"全民健康保險", "NATIONAL  HEALTH  INSURANCE", "林以安", "A200000001",
+            "089/01/02", "0000 1234 0007", "樣 本"};
+        try (ReadingHistory store = new ReadingHistory(RuntimeEnvironment.getApplication())) {
+            store.add(new AzureReader.Reading(catalog.cards.get("nhi_front"), String.join("\n", lines), null));
+        }
+        try (ActivityController<MainActivity> ctl = Robolectric.buildActivity(MainActivity.class).setup()) {
+            MainActivity activity = ctl.get();
+            View root = activity.findViewById(android.R.id.content);
+            View listLabel = find(root, "健保卡正面");
+            ((View) ((View) listLabel.getParent()).getParent()).performClick();
+            LinearLayout fieldPanel = (LinearLayout) find(root, "欄位結果").getParent().getParent();
+            LinearLayout jsonPanel = (LinearLayout) find(root, "辨識原文（JSON）").getParent().getParent();
+            LinearLayout page = (LinearLayout) fieldPanel.getParent();
+            assertSame(page, jsonPanel.getParent());
+            assertTrue(page.indexOfChild(fieldPanel) < page.indexOfChild(jsonPanel));
+            assertNotNull(find(fieldPanel, "已讀取 4 / 5"));
+            String[] labels = {"姓名", "身分證／居留證號", "出生日期", "健保卡卡號"};
+            String[] values = {"林以安", "A200000001", "089/01/02", "000012340007"};
+            for (int i = 0; i < labels.length; i++) {
+                assertNotNull(find(fieldPanel, labels[i]));
+                assertNotNull(find(fieldPanel, values[i]));
+            }
+            TextView body = jsonPanel.findViewWithTag("transcript-json");
+            assertEquals(View.GONE, ((View)body.getParent()).getVisibility());
+            find(jsonPanel, "展開").performClick();
+            assertEquals(View.VISIBLE, ((View)body.getParent()).getVisibility());
+            JSONObject json = new JSONObject(body.getText().toString());
+            JSONObject fields = json.getJSONObject("欄位");
+            assertEquals(4, fields.length());
+            for (int i = 0; i < labels.length; i++) assertEquals(values[i], fields.getString(labels[i]));
+            assertFalse(fields.has("性別"));
+            assertEquals(Arrays.asList(lines), jsonStrings(json.getJSONArray("原文逐行")));
+        }
+    }
+
+    @Test public void nhiKeepsExtractedValuesAndSkipsAmbiguousOrMissingData() throws Exception {
+        try (ActivityController<MainActivity> ctl = Robolectric.buildActivity(MainActivity.class).setup()) {
+            ReaderScreen ui = new ReaderScreen(ctl.get());
+            LinearLayout root = ui.col();
+            String raw = "NATIONAL HEALTH INSURANCE\nA200000001\n89/01/01\n90/01/01\n0000 0000 1010\n樣 本";
+            new ResultLayout(ui, root).show(new AzureReader.Reading(catalog.cards.get("nhi_front"), raw,
+                obj("NhiCardNumber", obj("valueString", "000000001111", "confidence", 0.95))));
+            TextView body = root.findViewWithTag("transcript-json");
+            JSONObject fields = new JSONObject(body.getText().toString()).getJSONObject("欄位");
+            assertEquals("000000001111", fields.getString("健保卡卡號"));
+            assertNotNull(find(root, "信心 95%"));
+            assertEquals("A200000001", fields.getString("身分證／居留證號"));
+            assertFalse(fields.has("姓名"));
+            assertFalse(fields.has("出生日期"));
+            assertFalse(fields.has("性別"));
+        }
+    }
+
     @Test public void plainIdOcrAlignsPrintedFieldsAndKeepsExactOriginal() throws Exception {
         String raw = "中華民國國民身分證\n樣\n本\n4\n姓名\n林\n以\n安\n出生\n年月日\n民國 80 年 2 月 3 日"
             + "\n發證日期\n民國 110 年 5 月 6 日(北市)補發\n性別 女\n統一編號\nA000000001";
@@ -159,7 +213,9 @@ public class CardReaderTest {
             LinearLayout root = ui.col();
             String prose = "第一段內文。\n\n第二段提及文件編號的用途。";
             new ResultLayout(ui, root).show(new AzureReader.Reading(catalog.cards.get("document"), prose, null));
-            assertNull(find(root, "展開"));
+            assertNotNull(find(root, "欄位結果"));
+            assertNotNull(find(root, "展開"));
+            assertEquals(View.GONE, ((View) root.findViewWithTag("transcript-json").getParent()).getVisibility());
             TextView json = root.findViewWithTag("transcript-json");
             assertEquals(Arrays.asList(prose.split("\\n")), jsonStrings(new JSONObject(json.getText().toString()).getJSONArray("原文逐行")));
             List<ResultLayout.Row> address = OcrRows.from(catalog.cards.get("id_back"), "住址\n測試市一區\n測試路1號\n00123456");
