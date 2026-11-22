@@ -747,31 +747,47 @@ public class CardReaderTest {
     }
 
     @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
-    public void bothLiveOutlineColorsHaveAThickBandAndContrastingOuterEdge() {
+    public void liveOutlineKeepsTheInteriorClearAndHighlightsOnlyTheFourCorners() {
         android.content.Context context = RuntimeEnvironment.getApplication();
         LiveScanActivity.Outline overlay = new LiveScanActivity.Outline(context);
         int w = 320, h = 200;
         float density = context.getResources().getDisplayMetrics().density;
         int[] gray = new int[w * h];
+        overlay.layout(0, 0, w, h);
         for (int margin : new int[]{34, 8}) {
             Arrays.fill(gray, 25);
             for (int y = margin; y < h - margin; y++) Arrays.fill(gray, y*w + margin, (y+1)*w - margin, 220);
             DocumentFrame frame = DocumentFrame.detect(gray, w, h, null);
             assertNotNull(frame);
-            overlay.layout(0, 0, w, h);
             overlay.show(frame);
             android.graphics.Bitmap image = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
-            image.eraseColor(android.graphics.Color.WHITE);
-            overlay.draw(new android.graphics.Canvas(image));
-            int color = margin == 34 ? LiveScanActivity.Outline.YELLOW : LiveScanActivity.Outline.GREEN;
-            int colored = 0, dark = 0;
-            for (int y = 2; y < h / 2; y++) {
-                int pixel = image.getPixel(w / 2, y);
-                if (pixel == color) colored++;
-                if (android.graphics.Color.red(pixel) < 50 && android.graphics.Color.green(pixel) < 50 && android.graphics.Color.blue(pixel) < 50) dark++;
+            android.graphics.Canvas canvas = new android.graphics.Canvas(image);
+            overlay.draw(canvas);
+            assertEquals(0, image.getPixel(w/2,h/2));
+            int shade = android.graphics.Color.alpha(image.getPixel(0,0));
+            assertTrue(shade > 0 && shade < 100);
+            int midStroke = 0;
+            for (int y=0; y<h/2; y++) {
+                if (android.graphics.Color.alpha(image.getPixel(w/2,y)) > shade) midStroke++;
             }
-            assertTrue(colored >= (int)(5 * density) - 1);
-            assertTrue(dark >= Math.max(2, (int)(4 * density) - 2));
+            assertTrue(midStroke > 0 && midStroke <= Math.ceil(2.1f*density)+2);
+            int accent = margin == 34 ? LiveScanActivity.Outline.AMBER : LiveScanActivity.Outline.MINT;
+            for (int i=0; i<8; i+=2) {
+                int cx=Math.round(frame.corners[i]*w), cy=Math.round(frame.corners[i+1]*h);
+                boolean found = false;
+                int reach = (int)Math.ceil(10*density);
+                for (int y=Math.max(0,cy-reach); y<Math.min(h,cy+reach); y++)
+                    for (int x=Math.max(0,cx-reach); x<Math.min(w,cx+reach); x++)
+                        found |= image.getPixel(x,y) == accent;
+                assertTrue("missing corner accent " + i, found);
+            }
+            overlay.show(null);
+            image.eraseColor(android.graphics.Color.TRANSPARENT);
+            overlay.draw(canvas);
+            assertEquals(0, image.getPixel(w/2,h/2));
+            int idleShade = android.graphics.Color.alpha(image.getPixel(0,0));
+            for (int y=0; y<h/2; y++)
+                assertTrue(android.graphics.Color.alpha(image.getPixel(w/2,y)) <= idleShade);
             image.recycle();
         }
     }

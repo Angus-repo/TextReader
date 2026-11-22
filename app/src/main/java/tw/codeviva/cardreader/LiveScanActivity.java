@@ -23,6 +23,9 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
     static final int COVERAGE_PERCENT = 60;
     static final float MIN_COVERAGE = COVERAGE_PERCENT / 100f;
     static boolean coversEnough(float coverage) { return coverage >= MIN_COVERAGE; }
+    private static boolean fitsWindow(DocumentFrame frame) {
+        return !frame.clipped && frame.coverage <= .955f && coversEnough(frame.coverage);
+    }
     static final String BARCODE_ONLY = "barcode_only", BARCODE_VALUE = "barcode_value";
     static final String BARCODE_GUIDE = "對準同一張身分證背面的左下角條碼";
     private boolean barcodeOnly;
@@ -90,10 +93,10 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
         LinearLayout footer = ui.col();
         ui.pad(footer, 14, 10);
         root.addView(footer);
-        hint = ui.text(barcodeOnly ? BARCODE_GUIDE : "請將文件四角放入取景框", 26, 0xff302511, true);
+        hint = ui.text(barcodeOnly ? BARCODE_GUIDE : "請將文件四角放入取景框", 26, ReaderScreen.INK, true);
         hint.setTypeface(Typeface.DEFAULT_BOLD);
         hint.setGravity(Gravity.CENTER);
-        hint.setBackground(ui.bg(0xffffdf91, 14, false));
+        hint.setBackground(ui.bg(ReaderScreen.PALE, 14, false));
         hint.setMinimumHeight(ui.dp(60));
         ui.pad(hint, 12, 10);
         hint.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
@@ -228,7 +231,7 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
         main.removeCallbacksAndMessages(null);
         previous = null;
         previousBarcode = "";
-        if (outline != null) outline.show(null);
+        if (outline != null) showFrame(null);
         if (camera != null) {
             Camera old = camera;
             camera = null;
@@ -303,7 +306,7 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
                 return;
             }
             if (!coversEnough(doc.coverage)) {
-                report(token, doc, "請靠近一點，目前文件占 " + (int) (doc.coverage * 100f) + "%", false, null);
+                report(token, doc, "請靠近一點，目前占 " + (int) (doc.coverage * 100f) + "%", false, null);
                 return;
             }
             if (!DeviceText.legible(scene, image, doc)) {
@@ -312,7 +315,7 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
             }
             cropped = doc.crop(image);
             byte[] jpeg = CardPhoto.encoded(cropped, Bitmap.CompressFormat.JPEG, 95);
-            report(token, doc, "請拿穩手機，正在確認畫面穩定", true, jpeg);
+            report(token, doc, "請拿穩，正在確認穩定度", true, jpeg);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (IOException e) {
@@ -347,7 +350,7 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
     private void report(int token, DocumentFrame doc, String status, boolean ready, byte[] jpeg) {
         main.post(() -> {
             if (token != generation || !resumed || finished) return;
-            outline.show(doc);
+            showFrame(doc);
             if (barcodeOnly) previousBarcode = "";
             if (ready && doc.closeTo(previous)) {
                 try (OutputStream out = getContentResolver().openOutputStream(getIntent().getData(), "wt")) {
@@ -369,52 +372,86 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
         });
     }
 
+    private void showFrame(DocumentFrame frame) {
+        outline.show(frame);
+        int background = frame == null ? ReaderScreen.PALE : fitsWindow(frame) ? 0xffd6f2e5 : 0xffffebc7;
+        hint.getBackground().setTint(background);
+    }
+
     private void message(String s) { if (!s.contentEquals(hint.getText())) hint.setText(s); }
 
     static final class Outline extends View {
-        static final int YELLOW = 0xffffcf00, GREEN = 0xff29fa70;
-        private static final int EDGE = 0xff15201c;
+        static final int AMBER = 0xffffc566, MINT = 0xff70e5bd;
+        private static final float INSET = (1f - (float)Math.sqrt(MIN_COVERAGE)) / 2;
+        private static final float[] GUIDE = {INSET, INSET, 1-INSET, INSET, 1-INSET, 1-INSET, INSET, 1-INSET};
+        private final float density = getResources().getDisplayMetrics().density;
         private final Paint pen = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path border = new Path(), brackets = new Path(), outside = new Path();
         private DocumentFrame frame;
-        Outline(Context c) { super(c); }
-        void show(DocumentFrame frame) { this.frame = frame; invalidate(); }
-        @Override protected void onDraw(Canvas c) {
-            float w = getWidth(), h = getHeight(), density = getResources().getDisplayMetrics().density;
-            pen.setStyle(Paint.Style.STROKE);
-            pen.setStrokeWidth(2 * density);
-            pen.setColor(0xccffffff);
-            c.drawRect(1, 1, w-1, h-1, pen);
-            // Scale the side lengths so the guide encloses the capture threshold area.
-            float inset = (1f - (float) Math.sqrt(MIN_COVERAGE)) / 2;
-            float guide = 12 * density;
-            pen.setColor(0xcce2f0e6);
-            for (int sideX = 0; sideX < 2; sideX++) for (int sideY = 0; sideY < 2; sideY++) {
-                float x = w * (sideX == 0 ? inset : 1-inset), y = h * (sideY == 0 ? inset : 1-inset);
-                c.drawLine(x, y, x + (sideX == 0 ? guide : -guide), y, pen);
-                c.drawLine(x, y, x, y + (sideY == 0 ? guide : -guide), pen);
-            }
-            if (frame == null) return;
-            Path path = new Path();
-            path.moveTo(frame.corners[0] * w, frame.corners[1] * h);
-            for (int i = 2; i < 8; i += 2) path.lineTo(frame.corners[i] * w, frame.corners[i+1] * h);
-            path.close();
-            boolean fits = !frame.clipped && frame.coverage <= .955f && coversEnough(frame.coverage);
-            int color = fits ? GREEN : YELLOW;
+
+        Outline(Context context) {
+            super(context);
+            pen.setStrokeCap(Paint.Cap.ROUND);
             pen.setStrokeJoin(Paint.Join.ROUND);
-            pen.setStrokeWidth(9 * density);
-            pen.setColor(EDGE);
-            c.drawPath(path, pen);
-            pen.setStrokeWidth(5 * density);
+            setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        }
+
+        void show(DocumentFrame frame) {
+            this.frame = frame;
+            invalidate();
+        }
+
+        private void stroke(Canvas canvas, Path path, int color, float dp) {
+            pen.setStyle(Paint.Style.STROKE);
+            pen.setStrokeWidth(dp * density);
             pen.setColor(color);
-            c.drawPath(path, pen);
-            pen.setStyle(Paint.Style.FILL);
+            canvas.drawPath(path, pen);
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            int w = getWidth(), h = getHeight();
+            if (w == 0 || h == 0) return;
+            float[] points = frame == null ? GUIDE : frame.corners;
+            border.rewind();
+            brackets.rewind();
+            border.moveTo((points[6] + points[0]) * w / 2, (points[7] + points[1]) * h / 2);
             for (int i = 0; i < 8; i += 2) {
-                float x = frame.corners[i] * w, y = frame.corners[i + 1] * h;
-                pen.setColor(EDGE);
-                c.drawCircle(x, y, 7 * density, pen);
-                pen.setColor(color);
-                c.drawCircle(x, y, 5 * density, pen);
+                int previous = (i + 6) % 8, next = (i + 2) % 8;
+                float x = points[i]*w, y = points[i+1]*h;
+                float ax = points[previous]*w - x, ay = points[previous+1]*h - y;
+                float bx = points[next]*w - x, by = points[next+1]*h - y;
+                float a = (float)Math.hypot(ax,ay), b = (float)Math.hypot(bx,by);
+                if (a < 1 || b < 1) return;
+                ax /= a; ay /= a; bx /= b; by /= b;
+                float arm = Math.min(19*density, Math.min(a,b)*.22f);
+                float bend = Math.min(5*density, arm*.5f);
+                float startX = x+ax*bend, startY = y+ay*bend;
+                float endX = x+bx*bend, endY = y+by*bend;
+                border.lineTo(startX, startY);
+                border.quadTo(x, y, endX, endY);
+                brackets.moveTo(x+ax*arm, y+ay*arm);
+                brackets.lineTo(startX, startY);
+                brackets.quadTo(x, y, endX, endY);
+                brackets.lineTo(x+bx*arm, y+by*arm);
             }
+            border.close();
+
+            outside.rewind();
+            outside.setFillType(Path.FillType.EVEN_ODD);
+            outside.addRect(0, 0, w, h, Path.Direction.CW);
+            outside.addPath(border);
+            pen.setStyle(Paint.Style.FILL);
+            pen.setColor(frame == null ? 0x200b2122 : 0x410b2122);
+            canvas.drawPath(outside, pen);
+
+            int color = 0xffedf6f1;
+            if (frame != null) {
+                color = fitsWindow(frame) ? MINT : AMBER;
+                stroke(canvas, border, 0x7430443f, 2.1f);
+                stroke(canvas, border, color, 1.1f);
+            }
+            stroke(canvas, brackets, 0x95223532, 4f);
+            stroke(canvas, brackets, color, 2.6f);
         }
     }
 }
