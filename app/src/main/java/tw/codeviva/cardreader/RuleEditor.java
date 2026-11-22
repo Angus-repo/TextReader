@@ -44,7 +44,7 @@ final class RuleEditor {
         body.addView(ui.text(ResultText.RULE, 14, MUTED, false));
         ui.gap(body, 12);
         if ("id_back".equals(code)) {
-            body.addView(ui.text("手機會解碼卡背左下角的一維條碼，與右下角印出的證件流水號分開顯示。", 14, MUTED, false));
+            body.addView(ui.text("手機會解碼左下角條碼，從中讀取身分證字號。右下角的十位數字另列為證件流水號。役別欄無文字時，結果會保留空白。", 14, MUTED, false));
             ui.gap(body, 12);
         }
         if (card == null) {

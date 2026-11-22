@@ -41,6 +41,9 @@ final class ResultLayout {
         boolean nhi = reading.type.code.equals("nhi_front");
         boolean front = reading.type.code.equals("id_front"), back = reading.type.code.equals("id_back");
         String sexLabel = front ? reading.type.fieldLabel("Sex") : null;
+        String idLabel = back ? IdCardDetails.ID_LABEL : (front ? reading.type.fieldLabel("IdNumber") : null);
+        String serviceLabel = back ? reading.type.fieldLabel("MilitaryService") : null;
+        String serialLabel = back ? reading.type.fieldLabel("Serial") : null;
         String deviceNote = null;
         boolean usedImage = false;
         List<Row> local = null;
@@ -48,9 +51,13 @@ final class ResultLayout {
         for (int i = 0; i < reading.type.fields.length(); i++) {
             JSONObject definition = reading.type.fields.optJSONObject(i);
             String label = definition.optString("label");
-            JSONObject field = reading.fields == null ? null : reading.fields.optJSONObject(definition.optString("key"));
-            String value = field == null || field.isNull("valueString") ? "" : ResultText.forDisplay(field.optString("valueString")).trim();
-            if (front && "Sex".equals(definition.optString("key"))) value = IdCardDetails.sexValue(value);
+            String key = definition.optString("key");
+            JSONObject field = reading.fields == null ? null : reading.fields.optJSONObject(key);
+            String value = IdCardDetails.cloudValue(reading, key);
+            if (front && "Sex".equals(key)) value = IdCardDetails.sexValue(value);
+            if (front && "IdNumber".equals(key)) value = IdCardDetails.idNumber(value);
+            if (back && "MilitaryService".equals(key)) value = IdCardDetails.serviceValue(value);
+            if (back && "Serial".equals(key)) value = IdCardDetails.serial(value);
             if (!value.isEmpty()) {
                 rows.add(new Row(label, value, field.optDouble("confidence")));
                 cloudValues++;
@@ -68,7 +75,11 @@ final class ResultLayout {
         }
         if (!nhi && rows.isEmpty()) {
             rows = OcrRows.from(reading.type, displayText);
-            if (front) rows.removeIf(row -> "性別".equals(row.label) || row.label.equals(sexLabel));
+            // Resolve these labels below, even when cloud extraction returned other fields.
+            if (front) rows.removeIf(row -> "性別".equals(row.label) || row.label.equals(sexLabel)
+                    || "統一編號".equals(row.label) || "身分證字號".equals(row.label) || row.label.equals(idLabel));
+            if (back) rows.removeIf(row -> "役別".equals(row.label) || row.label.equals(serviceLabel)
+                    || row.label.equals(serialLabel) || IdCardDetails.ID_LABEL.equals(row.label));
             for (Row row : rows) missing.remove(row.label);
         }
 
@@ -83,6 +94,35 @@ final class ResultLayout {
             } else {
                 rows.add(new Row(sexLabel, sex, Double.NaN));
                 missing.remove(sexLabel);
+            }
+        }
+        if (idLabel != null && uniqueRow(rows, idLabel) == null) {
+            String id = back ? IdCardDetails.barcodeId(reading.local.optString("Barcode")) : IdCardDetails.idNumber(displayText);
+            if (front && id.isEmpty()) {
+                id = IdCardDetails.idNumber(reading.local.optString("IdNumber"));
+                usedImage |= !id.isEmpty();
+            }
+            rows.add(new Row(idLabel, id.isEmpty() ? null : id, Double.NaN));
+            missing.remove(idLabel);
+        }
+        if (serviceLabel != null && uniqueRow(rows, serviceLabel) == null) {
+            String service = IdCardDetails.militaryService(displayText);
+            if (service.isEmpty()) {
+                service = IdCardDetails.serviceValue(reading.local.optString("MilitaryService"));
+                usedImage |= !service.isEmpty();
+            }
+            rows.add(new Row(serviceLabel, service, Double.NaN));
+            missing.remove(serviceLabel);
+        }
+        if (serialLabel != null && uniqueRow(rows, serialLabel) == null) {
+            String serial = IdCardDetails.serial(displayText);
+            if (serial.isEmpty()) {
+                serial = IdCardDetails.serial(reading.local.optString("Serial"));
+                usedImage |= !serial.isEmpty();
+            }
+            if (!serial.isEmpty()) {
+                rows.add(new Row(serialLabel, serial, Double.NaN));
+                missing.remove(serialLabel);
             }
         }
         if (back) {
@@ -104,15 +144,17 @@ final class ResultLayout {
         TextView heading = ui.text("欄位結果", 17, GREEN, true);
         heading.setAccessibilityHeading(true);
         ui.weight(header, heading);
+        int filled = 0;
+        for (Row row : rows) if (row.value != null && !row.value.isEmpty()) filled++;
         if (cloudValues > 0 || nhi) {
-            header.addView(ui.text("已讀取 " + rows.size() + " / " + (reading.type.fields.length() + (back ? 1 : 0)), 13, MUTED, false));
+            header.addView(ui.text("已讀取 " + filled + " / " + (reading.type.fields.length() + (back ? 2 : 0)), 13, MUTED, false));
         }
         ui.gap(card, 8);
         if (rows.isEmpty()) {
             String message = reading.text.isEmpty() ? "這張影像未讀到文字。" : "未辨識出可對應的欄位，可展開下方 JSON 查看原文。";
             if (!reading.text.isEmpty() && displayText.trim().isEmpty()) message = "沒有其他可顯示的文字。";
             card.addView(ui.text(message, 14, MUTED, false));
-        } else if (rows.size() > cloudValues) {
+        } else if (filled > cloudValues) {
             String source = cloudValues == 0 ? "依原文整理" : "部分欄位依原文整理";
             card.addView(ui.text(usedImage ? "含手機從影像讀取的欄位" : source, 13, MUTED, false));
             ui.gap(card, 6);
@@ -141,7 +183,7 @@ final class ResultLayout {
         Row match = null;
         for (Row row : rows) {
             if (!label.equals(row.label)) continue;
-            if (match != null && !match.value.equals(row.value)) return null;
+            if (match != null && !java.util.Objects.equals(match.value, row.value)) return null;
             match = row;
         }
         return match;
@@ -175,7 +217,7 @@ final class ResultLayout {
             ui.gap(row, 12);
             row.addView(values, new LinearLayout.LayoutParams(0, -2, 0.73f));
         }
-        TextView value = ui.text(data.value, 17, INK, true);
+        TextView value = data.value == null ? ui.text("未讀取", 15, MUTED, false) : ui.text(data.value, 17, INK, true);
         value.setBreakStrategy(android.text.Layout.BREAK_STRATEGY_BALANCED);
         value.setTextIsSelectable(true);
         values.addView(value);
@@ -188,7 +230,7 @@ final class ResultLayout {
     private static String transcriptJson(String typeLabel, String displayText, List<Row> rows) {
         try {
             JSONObject values = new JSONObject();
-            for (Row row : rows) values.accumulate(row.label, row.value);
+            for (Row row : rows) values.accumulate(row.label, row.value == null ? JSONObject.NULL : row.value);
             JSONArray lines = new JSONArray();
             if (!displayText.isEmpty()) {
                 for (String line : displayText.split("\\r\\n|\\r|\\n", -1)) lines.put(line);

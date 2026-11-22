@@ -248,6 +248,120 @@ public class CardReaderTest {
         assertEquals("本人、同樣、正本與樣張", ResultText.forDisplay("本人、同樣、正本與樣張"));
     }
 
+    @Test public void frontIdUsesCompletePrintedDigitsWithOrWithoutLabelAndWithPartialCloudResults() throws Exception {
+        assertEquals("B212300007", IdCardDetails.idNumber("統一編號：ｂ２１２　３００\n００７"));
+        assertEquals("", IdCardDetails.idNumber("B21230O007"));
+        assertEquals("", IdCardDetails.idNumber("B2123000078"));
+        assertEquals("", IdCardDetails.idNumber("B212300007\nC212300007"));
+        try (ActivityController<MainActivity> ctl = Robolectric.buildActivity(MainActivity.class).setup()) {
+            AzureReader.Reading front = new AzureReader.Reading(catalog.cards.get("id_front"),
+                    "發證日期\nB 2123\n00007", obj("Sex", obj("valueString", "女")));
+            LinearLayout page = new ReaderScreen(ctl.get()).col();
+            new ResultLayout(new ReaderScreen(ctl.get()), page).show(front);
+            assertNotNull(find(page, "身分證字號"));
+            assertNotNull(find(page, "B212300007"));
+            JSONObject fields = new JSONObject(((TextView)page.findViewWithTag("transcript-json")).getText().toString()).getJSONObject("欄位");
+            assertEquals("B212300007", fields.getString("身分證字號"));
+            assertEquals("女", fields.getString("性別"));
+
+            front = new AzureReader.Reading(catalog.cards.get("id_front"), "漏讀字號", null);
+            front.local.put("IdNumber", "B212300007");
+            try (ReadingHistory db = new ReadingHistory(ctl.get())) {
+                page = new ReaderScreen(ctl.get()).col();
+                new ResultLayout(new ReaderScreen(ctl.get()), page).show(db.get(db.add(front)));
+                assertNotNull(find(page, "B212300007"));
+            }
+        }
+    }
+
+    @Test public void backSeparatesIdBarcodeAndSerialAndKeepsBlankMilitaryFieldInHistoryAndJson() throws Exception {
+        assertEquals("常備兵役", IdCardDetails.militaryService("配偶 張甲　役 別：常備兵役\n出生地 臺中市"));
+        assertEquals("替代役", IdCardDetails.militaryService("役\n別\n替代役\n住址"));
+        assertEquals("", IdCardDetails.militaryService("役別　樣本\n出生地 臺中市"));
+        assertEquals("", IdCardDetails.militaryService("役別\n臺中市"));
+        try (ActivityController<MainActivity> ctl = Robolectric.buildActivity(MainActivity.class).setup();
+             ReadingHistory db = new ReadingHistory(ctl.get())) {
+            for (String barcode : new String[]{"B212300007", "0000000105", ""}) {
+                AzureReader.Reading back = new AzureReader.Reading(catalog.cards.get("id_back"),
+                        "配偶 張甲　役別\n出生地 臺中市\n0000000105", obj("Spouse", obj("valueString", "張甲")));
+                back.local.put("Barcode", barcode);
+                ReaderScreen ui = new ReaderScreen(ctl.get());
+                LinearLayout page = ui.col();
+                new ResultLayout(ui, page).show(db.get(db.add(back)));
+                assertNotNull(find(page, "身分證字號"));
+                assertNotNull(find(page, "役別"));
+                JSONObject fields = new JSONObject(((TextView)page.findViewWithTag("transcript-json")).getText().toString()).getJSONObject("欄位");
+                assertEquals("", fields.getString("役別"));
+                assertEquals("0000000105", fields.getString("證件流水號"));
+                if (barcode.startsWith("B")) assertEquals(barcode, fields.getString("身分證字號"));
+                else { assertTrue(fields.has("身分證字號")); assertTrue(fields.isNull("身分證字號")); }
+            }
+            AzureReader.Reading old = new AzureReader.Reading(catalog.cards.get("id_back"), "役別 免役", null);
+            LinearLayout page = new ReaderScreen(ctl.get()).col();
+            new ResultLayout(new ReaderScreen(ctl.get()), page).show(old);
+            assertNotNull(find(page, "免役"));
+        }
+    }
+
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    public void bothLiveOutlineColorsHaveAThickBandAndContrastingOuterEdge() {
+        android.content.Context context = RuntimeEnvironment.getApplication();
+        LiveScanActivity.Outline overlay = new LiveScanActivity.Outline(context);
+        int w = 320, h = 200;
+        float density = context.getResources().getDisplayMetrics().density;
+        int[] gray = new int[w * h];
+        for (int margin : new int[]{28, 8}) {
+            Arrays.fill(gray, 25);
+            for (int y = margin; y < h - margin; y++) Arrays.fill(gray, y*w + margin, (y+1)*w - margin, 220);
+            DocumentFrame frame = DocumentFrame.detect(gray, w, h, null);
+            assertNotNull(frame);
+            overlay.layout(0, 0, w, h);
+            overlay.show(frame);
+            android.graphics.Bitmap image = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
+            image.eraseColor(android.graphics.Color.WHITE);
+            overlay.draw(new android.graphics.Canvas(image));
+            int color = margin == 28 ? LiveScanActivity.Outline.YELLOW : LiveScanActivity.Outline.GREEN;
+            int colored = 0, dark = 0;
+            for (int y = 2; y < h / 2; y++) {
+                int pixel = image.getPixel(w / 2, y);
+                if (pixel == color) colored++;
+                if (android.graphics.Color.red(pixel) < 50 && android.graphics.Color.green(pixel) < 50 && android.graphics.Color.blue(pixel) < 50) dark++;
+            }
+            assertTrue(colored >= (int)(5 * density) - 1);
+            assertTrue(dark >= Math.max(2, (int)(4 * density) - 2));
+            image.recycle();
+        }
+    }
+
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    public void slightlyTiltedShortBarcodeSuppliesBackIdFromPixels() throws Exception {
+        String number = "B212300007";
+        int w = 450, h = 36;
+        com.google.zxing.common.BitMatrix bars = new com.google.zxing.oned.Code128Writer().encode(
+                number, com.google.zxing.BarcodeFormat.CODE_128, w, h);
+        int[] pixels = new int[w * h];
+        for (int y = 0; y < h; y++) for (int x = 0; x < w; x++)
+            pixels[y*w+x] = bars.get(x, y) ? android.graphics.Color.BLACK : android.graphics.Color.WHITE;
+        android.graphics.Bitmap strip = android.graphics.Bitmap.createBitmap(pixels, w, h, android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Bitmap photo = android.graphics.Bitmap.createBitmap(900, 560, android.graphics.Bitmap.Config.ARGB_8888);
+        photo.eraseColor(android.graphics.Color.WHITE);
+        android.graphics.Canvas c = new android.graphics.Canvas(photo);
+        c.rotate(15, 310, 445);
+        c.drawBitmap(strip, 85, 427, null);
+        try (ActivityController<MainActivity> ctl = Robolectric.buildActivity(MainActivity.class).setup()) {
+            AzureReader.Reading reading = new AzureReader.Reading(catalog.cards.get("id_back"), "役別 常備兵役\n0000000105", null);
+            IdCardDetails.readImage(ctl.get(), reading, CardPhoto.encoded(photo, android.graphics.Bitmap.CompressFormat.JPEG, 94));
+            ReaderScreen ui = new ReaderScreen(ctl.get());
+            LinearLayout page = ui.col();
+            new ResultLayout(ui, page).show(reading);
+            JSONObject fields = new JSONObject(((TextView)page.findViewWithTag("transcript-json")).getText().toString()).getJSONObject("欄位");
+            assertEquals(number, fields.getString("身分證字號"));
+            assertEquals(number, fields.getString(IdCardDetails.BARCODE_LABEL));
+            assertEquals("常備兵役", fields.getString("役別"));
+            assertEquals("0000000105", fields.getString("證件流水號"));
+        } finally { photo.recycle(); strip.recycle(); }
+    }
+
     @Test public void idFrontShowsPrintedSexWithSplitLabelsAndPartialCloudFields() throws Exception {
         assertEquals("女", IdCardDetails.printedSex("發證日期  性\n 別：女\n統一編號"));
         assertEquals("男", IdCardDetails.printedSex("性別男統一編號"));

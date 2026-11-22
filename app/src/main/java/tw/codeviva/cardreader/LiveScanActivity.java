@@ -344,7 +344,9 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
 
     private void message(String s) { if (!s.contentEquals(hint.getText())) hint.setText(s); }
 
-    private static final class Outline extends View {
+    static final class Outline extends View {
+        static final int YELLOW = 0xffffcf00, GREEN = 0xff29fa70;
+        private static final int EDGE = 0xff15201c;
         private final Paint pen = new Paint(Paint.ANTI_ALIAS_FLAG);
         private DocumentFrame frame;
         Outline(Context c) { super(c); }
@@ -369,8 +371,23 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
             path.moveTo(frame.corners[0] * w, frame.corners[1] * h);
             for (int i = 2; i < 8; i += 2) path.lineTo(frame.corners[i] * w, frame.corners[i+1] * h);
             path.close();
-            pen.setColor(!frame.clipped && frame.coverage <= .955f && coversEnough(frame.coverage) ? 0xff88f1bc : 0xffffc96b);
+            boolean fits = !frame.clipped && frame.coverage <= .955f && coversEnough(frame.coverage);
+            int color = fits ? GREEN : YELLOW;
+            pen.setStrokeJoin(Paint.Join.ROUND);
+            pen.setStrokeWidth(9 * density);
+            pen.setColor(EDGE);
             c.drawPath(path, pen);
+            pen.setStrokeWidth(5 * density);
+            pen.setColor(color);
+            c.drawPath(path, pen);
+            pen.setStyle(Paint.Style.FILL);
+            for (int i = 0; i < 8; i += 2) {
+                float x = frame.corners[i] * w, y = frame.corners[i + 1] * h;
+                pen.setColor(EDGE);
+                c.drawCircle(x, y, 7 * density, pen);
+                pen.setColor(color);
+                c.drawCircle(x, y, 5 * density, pen);
+            }
         }
     }
 }
