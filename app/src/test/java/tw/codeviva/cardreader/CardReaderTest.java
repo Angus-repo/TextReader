@@ -196,6 +196,130 @@ public class CardReaderTest {
         }
     }
 
+    @Test public void editingCriteriaDoesNotReplaceLegacyAnalyzerButChangedFieldsGetNewSchema() throws Exception {
+        CardCatalog.Card original = catalog.cards.get("nhi_front");
+        String oldId = original.analyzerId(config.cuModel);
+        String criteria = "右側印有全民健康保險字樣。";
+        JSONArray fields = new JSONArray(original.fields.toString());
+        catalog.save(original.code, original.label, criteria, fields, true);
+        assertEquals(oldId, catalog.cards.get(original.code).analyzerId(config.cuModel));
+        fields.getJSONObject(0).put("description", "擷取右側姓名欄的完整姓名");
+        catalog.save(original.code, original.label, criteria, fields, true);
+        CardCatalog second = new CardCatalog(RuntimeEnvironment.getApplication());
+        CardCatalog.Card edited = second.cards.get(original.code);
+        String changedId = edited.analyzerId(config.cuModel);
+        assertNotEquals(oldId, changedId);
+        assertTrue(changedId.matches("[a-zA-Z0-9._-]{1,64}"));
+        assertEquals(edited.analyzerId(config.cuModel), catalog.cards.get(original.code).analyzerId(config.cuModel));
+        assertTrue(edited.autoFields);
+        assertTrue(edited.schema(config.cuModel).getJSONObject("fieldSchema").getJSONObject("fields")
+            .getJSONObject("Name").getString("description").contains("擷取右側姓名欄的完整姓名"));
+        for (boolean open : new boolean[]{false,true}) {
+            config.openAI = open;
+            JSONObject payload = new AzureReader(second, config).decisionBody("AQID");
+            if (open) {
+                JSONArray choices = payload.getJSONArray("questions").getJSONObject(0).getJSONArray("choices");
+                boolean found = false;
+                for (int n = 0; n < choices.length(); n++) {
+                    JSONObject choice = choices.getJSONObject(n);
+                    if (choice.getString("value").equals(original.code)) found = choice.getString("description").contains(criteria);
+                }
+                assertTrue(found);
+            } else {
+                assertTrue(payload.getJSONObject("questions").getJSONObject(AzureReader.QUESTION)
+                    .getJSONObject("criteria").getString(original.code).contains(criteria));
+            }
+        }
+        second.reset(original.code);
+        assertEquals(oldId, second.cards.get(original.code).analyzerId(config.cuModel));
+        assertFalse(second.cards.get(original.code).autoFields);
+    }
+
+    @Test public void rulesEditorCreatesTypeThenScanUsesItsDescriptionAndReturnsNamedField() throws Exception {
+        String label = "職員證正面", criterion = "公司標誌在正上方，左側有人像。", description = "讀取姓名下方的六位員工編號。";
+        try (ActivityController<MainActivity> editor = Robolectric.buildActivity(MainActivity.class).setup()) {
+            View root = editor.get().findViewById(android.R.id.content);
+            find(root, "辨識規則").performClick();
+            find(root, "新增自訂類型").performClick();
+            inputByLabel(root, "類型名稱").setText(label);
+            inputByLabel(root, "分類描述").setText(criterion);
+            find(root, "新增欄位").performClick();
+            inputByLabel(root, "欄位名稱").setText("員工編號");
+            inputByLabel(root, "讀取描述").setText(description);
+            find(root, "儲存辨識規則").performClick();
+            assertNotNull(find(root, label));
+        }
+        catalog = new CardCatalog(RuntimeEnvironment.getApplication());
+        CardCatalog.Card custom = null;
+        for (CardCatalog.Card type : catalog.cards.values()) if (type.label.equals(label)) custom = type;
+        assertNotNull(custom);
+        final CardCatalog.Card saved = custom;
+        String fieldKey = saved.fields.getJSONObject(0).getString("key");
+        List<String> calls = Collections.synchronizedList(new ArrayList<>());
+        try (ActivityController<OfflineActivity> ctl = Robolectric.buildActivity(OfflineActivity.class).setup()) {
+            OfflineActivity a = ctl.get();
+            a.reader = new AzureReader(catalog, config, (method,url,header,key,body) -> {
+                if (url.endsWith(tw.codeviva.cardreader.Config.MS)) {
+                    assertTrue(body.getJSONObject("questions").getJSONObject(AzureReader.QUESTION)
+                        .getJSONObject("criteria").getString(saved.code).contains(criterion));
+                    calls.add("classify");
+                    return reply(200,null,obj("answers",obj(AzureReader.QUESTION,obj("type","choice","choice",saved.code))));
+                }
+                calls.add(method);
+                assertTrue(url.contains(saved.analyzerId(config.cuModel)));
+                if (method.equals("GET")) return reply(404,null,obj());
+                if (method.equals("PUT")) {
+                    assertTrue(body.getJSONObject("fieldSchema").getJSONObject("fields")
+                        .getJSONObject(fieldKey).getString("description").contains(description));
+                    return reply(201,null,obj("status","ready"));
+                }
+                return reply(200,null,obj("result",obj("contents",new JSONArray().put(
+                    obj("markdown","員工資料", "fields",obj(fieldKey,obj("valueString","000321")))))));
+            }, ms -> {});
+            android.graphics.Bitmap image = android.graphics.Bitmap.createBitmap(4,4,android.graphics.Bitmap.Config.ARGB_8888);
+            setField(a, "config", config);
+            setField(a, "photo", new CardPhoto(image, new byte[]{1,2,3}));
+            java.lang.reflect.Method preview = MainActivity.class.getDeclaredMethod("preview");
+            preview.setAccessible(true);
+            preview.invoke(a);
+            View root = a.findViewById(android.R.id.content);
+            find(root, "開始辨識").performClick();
+            awaitText(root, "000321");
+            assertNotNull(find(root, "員工編號"));
+            assertEquals(Arrays.asList("classify", "GET", "PUT", "POST"), calls);
+            assertEquals(0, a.getWindow().getAttributes().flags & WindowManager.LayoutParams.FLAG_SECURE);
+        }
+        catalog.reset(saved.code);
+        assertFalse(new CardCatalog(RuntimeEnvironment.getApplication()).cards.containsKey(saved.code));
+    }
+
+    @Test public void duplicateOrIncompleteFieldsDoNotReplaceSavedRule() throws Exception {
+        CardCatalog.Card original = catalog.cards.get("id_front");
+        for (String label : new String[]{"", "姓名"}) {
+            JSONArray fields = new JSONArray(original.fields.toString());
+            fields.put(obj("key","NewField","label",label,"description","說明"));
+            try {
+                catalog.save(original.code, original.label, "暫存分類描述", fields, true);
+                fail("Expected invalid fields");
+            } catch (IllegalArgumentException expected) {
+                CardCatalog reload = new CardCatalog(RuntimeEnvironment.getApplication());
+                assertEquals(original.criteria, reload.cards.get(original.code).criteria);
+            }
+        }
+    }
+
+    private static EditText inputByLabel(View view, String description) {
+        if (view instanceof EditText && description.contentEquals(String.valueOf(view.getContentDescription()))) return (EditText)view;
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup)view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                EditText match = inputByLabel(group.getChildAt(i), description);
+                if (match != null) return match;
+            }
+        }
+        return null;
+    }
+
     private static void setField(MainActivity activity, String fieldName, Object value) throws Exception {
         java.lang.reflect.Field field = MainActivity.class.getDeclaredField(fieldName);
         field.setAccessible(true);

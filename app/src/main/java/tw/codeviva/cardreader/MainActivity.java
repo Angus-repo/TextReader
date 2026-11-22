@@ -24,7 +24,8 @@ public class MainActivity extends Activity {
     private CardCatalog catalog;
     private final List<AzureReader.Reading> results = new ArrayList<>();
     private boolean confirmType;
-    private boolean includeFields;
+    private int fieldMode; // 0: use type settings, 1: include fields, 2: text only
+    private RuleEditor ruleEditor;
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private CardPhoto photo;
     private String screen="home",selected=null,classified=null,status="",error="";
@@ -35,7 +36,6 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle saved){
         super.onCreate(saved);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
         if(Build.VERSION.SDK_INT>=30)getWindow().setDecorFitsSystemWindows(false);
         if(Build.VERSION.SDK_INT>=33)getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
             android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,this::onBackPressed);
@@ -57,7 +57,11 @@ public class MainActivity extends Activity {
         LinearLayout bar=ui.row();ui.pad(bar,16,6);bar.setMinimumHeight(ui.dp(62));outer.addView(bar);
         if(back!=null){Button b=ui.action("‹ 返回",false,back);bar.addView(b);ui.gap(bar,12);}
         TextView heading=ui.text(title,19,INK,true);ui.weight(bar,heading);
-        if(where.equals("home"))bar.addView(ui.action("連線設定",false,this::settings));
+        if (where.equals("home")) {
+            bar.addView(ui.action("辨識規則", false, this::rules));
+            ui.gap(bar, 4);
+            bar.addView(ui.action("連線設定", false, this::settings));
+        }
         ui.line(outer);
         scroll=new ScrollView(this);scroll.setFillViewport(true);outer.addView(scroll,-1,-1);
         content=ui.col();ui.pad(content,18,20);scroll.addView(content);setContentView(outer);
@@ -132,7 +136,7 @@ public class MainActivity extends Activity {
         final Uri temp=request==CAMERA?capture:null;
         Uri uri=request==CAMERA?temp:data==null?null:data.getData();
         if(result!=RESULT_OK||uri==null){clearCapture(temp);return;}
-        selected=null;classified=null;photo=null;error="";
+        selected=null;classified=null;photo=null;error="";fieldMode=0;
         run("正在載入影像…",()->{
             try{return CardPhoto.load(this,uri);}finally{if(temp!=null)runOnUiThread(()->clearCapture(temp));}
         },p->{photo=p;preview();});
@@ -194,11 +198,19 @@ public class MainActivity extends Activity {
             box.addView(ui.action(catalog.cards.get(selected).label + "　⌄", false, this::selectType));
         }
         if (selected == null || catalog.cards.get(selected).hasFields()) {
-            CheckBox fields = new CheckBox(this);
-            fields.setText("台灣證件一併擷取指定欄位");
-            fields.setChecked(includeFields);
-            fields.setOnCheckedChangeListener((v, checked) -> includeFields = checked);
-            box.addView(fields);
+            box.addView(ui.text("本次欄位讀取方式", 14, MUTED, true));
+            Spinner mode = new Spinner(this);
+            mode.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item,
+                new String[]{"依各類型設定", "全文及已設定的欄位", "只讀全文"}));
+            mode.setSelection(fieldMode);
+            mode.setContentDescription("本次欄位讀取方式");
+            mode.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                public void onNothingSelected(AdapterView<?> parent) {}
+                public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                    fieldMode = position;
+                }
+            });
+            box.addView(mode, -1, ui.dp(48));
         }
         ui.gap(box, 12);
         if (!config.ready()) box.addView(ui.action("設定 Azure 連線", true, this::settings));
@@ -237,7 +249,7 @@ public class MainActivity extends Activity {
         CardCatalog.Card type = catalog.cards.get(selected);
         AzureReader api = createReader();
         byte[] bytes = photo.jpeg;
-        boolean fields = includeFields;
+        boolean fields = fieldMode == 1 || (fieldMode == 0 && type.autoFields);
         int token = sequence + 1;
         run("已辨識為" + type.label + "，正在讀取文字…", () -> api.read(type, bytes, fields,
             message -> runOnUiThread(() -> {
@@ -277,7 +289,7 @@ public class MainActivity extends Activity {
 
     private void displayFields(CardCatalog.Card card, JSONObject fields) {
         ui.gap(content, 18);
-        heading(content, "證件欄位");
+        heading(content, "設定欄位");
         ui.gap(content, 8);
         int valid=0;LinearLayout list=ui.panel();
         for(int i=0;i<card.fields.length();i++) {
@@ -291,7 +303,7 @@ public class MainActivity extends Activity {
             }
             ui.gap(list,5);list.addView(ui.text(value.isEmpty()?"未讀取":value,18,value.isEmpty()?MUTED:INK,!value.isEmpty()));
         }
-        note(content,"已讀取 "+valid+" / "+card.fields.length()+" 欄。請與證件原文核對。");
+        note(content,"已讀取 "+valid+" / "+card.fields.length()+" 欄。請與影像原文核對。");
         ui.gap(content,14);content.addView(list);
     }
     private EditText field(LinearLayout box,String title,String value,String hint,boolean secret){
@@ -303,6 +315,27 @@ public class MainActivity extends Activity {
         input.setText(value);input.setContentDescription(title);input.setSelectAllOnFocus(false);box.addView(input,-1,-2);return input;
     }
     private void leaveSettings(){error="";if(photo==null)home();else preview();}
+    private void rules() {
+        ruleEditor = null;
+        shell("rules", "辨識規則", this::home);
+        note(content, "選擇一個類型，編輯分類特徵與要讀取的欄位。");
+        ui.gap(content, 12);
+        content.addView(ui.action("新增自訂類型", false, () -> editRule(null)));
+        ui.gap(content, 12);
+        LinearLayout list = ui.panel();
+        content.addView(list);
+        for (CardCatalog.Card card : catalog.cards.values()) {
+            if (list.getChildCount() > 0) ui.line(list);
+            String status = card.hasFields() ? card.fields.length() + " 個欄位" : "全文";
+            ui.tile(list, card.label, status, card.autoFields, () -> editRule(card.code));
+        }
+    }
+
+    private void editRule(String code) {
+        shell("editRule", code == null ? "新增自訂類型" : "編輯辨識規則", () -> ruleEditor.back());
+        ruleEditor = new RuleEditor(this, ui, content, catalog, code, this::rules);
+    }
+
     private void settings(){
         shell("settings","Azure 連線設定",this::leaveSettings);
         note(content,"請填寫 Azure 公有雲的資源端點與金鑰。設定會加密儲存在這支手機。");
@@ -324,10 +357,10 @@ public class MainActivity extends Activity {
             }
         });
         ui.gap(content,12);LinearLayout cu=ui.panel();content.addView(cu);heading(cu,"Content Understanding");
-        ui.gap(cu,6);note(cu,"全文使用內建 Read 或 Layout 分析器。若啟用證件欄位，才需另設擷取模型與 text-embedding-3-large 的部署對應，並允許建立分析器。");
+        ui.gap(cu,6);note(cu,"全文使用內建 Read 或 Layout 分析器。若啟用自訂欄位，才需另設擷取模型與 text-embedding-3-large 的部署對應，並允許建立分析器。");
         EditText ce=field(cu,"Content Understanding 資源端點",config.cuRoot,"https://資源名稱.services.ai.azure.com",false);
         EditText ck=field(cu,"Content Understanding API 金鑰",config.cuKey,"同一資源可填相同金鑰",true);
-        EditText cm=field(cu,"證件欄位用基礎模型名稱",config.cuModel,"例如 gpt-5.2",false);
+        EditText cm=field(cu,"自訂欄位用基礎模型名稱",config.cuModel,"例如 gpt-5.2",false);
         ui.gap(cu,6);note(cu,"填 Azure 預設模型對應左側的模型名稱。");
         ui.gap(content,12);TextView msg=ui.text("",14,0xff863b24,false);msg.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);content.addView(msg);
         ui.gap(content,4);content.addView(ui.action("儲存連線設定",true,()->{
@@ -345,6 +378,8 @@ public class MainActivity extends Activity {
     }
     @Override public void onBackPressed(){
         switch(screen){
+            case "rules":home();return;
+            case "editRule":ruleEditor.back();return;
             case "settings":leaveSettings();return;
             case "detail":home();return;
             case "preview":abandon();return;

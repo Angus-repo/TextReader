@@ -76,8 +76,8 @@ final class AzureReader {
     }
     JSONObject decisionBody(String png) throws JSONException {
         JSONObject criteria=new JSONObject();
-        for(CardCatalog.Card card:catalog.cards.values()) criteria.put(card.code,card.criteria);
-        String instruction="依整張影像的用途、版面與可見文字，選出最符合的類型。遇到台灣證件時請區分正反面。多種類型或無法判定時選 other。";
+        for(CardCatalog.Card card:catalog.cards.values()) criteria.put(card.code,card.label + "：" + card.criteria);
+        String instruction="依照各類型的分類描述比對整張影像，選出最符合的類型，留意描述中的正反面特徵。無法判定時選 other。";
         if (!config.openAI) {
             return obj("model",config.model,"state","判斷影像類型：image:card.png",
                 "assets",obj("card.png",obj("type","image","format","png","data_base64",png)),
