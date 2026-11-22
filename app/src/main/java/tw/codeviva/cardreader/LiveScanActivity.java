@@ -20,7 +20,6 @@ import java.util.concurrent.Executors;
 
 @SuppressWarnings("deprecation")
 public final class LiveScanActivity extends Activity implements TextureView.SurfaceTextureListener {
-    static final int SAMPLE_FOUND = RESULT_FIRST_USER;
     static final String REVIEW_CROP = "review_crop";
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -263,7 +262,6 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
             image = viewfinder(data, w, h, turn, ratio);
             if (reader == null) reader = new DeviceText(this);
             Text scene = reader.read(image);
-            if (skipIfSample(scene, token)) return;
             Rect words = DeviceText.documentTextBounds(scene, image);
             DocumentFrame doc = DocumentFrame.detect(image, words);
             if (doc == null) {
@@ -310,14 +308,6 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
             if (cropped != null) cropped.recycle();
             if (image != null) image.recycle();
         }
-    }
-
-    private boolean skipIfSample(Text text, int token) {
-        if (!DeviceText.sample(text)) return false;
-        main.post(() -> {
-            if (token == generation && !finished) { finished = true; setResult(SAMPLE_FOUND); finish(); }
-        });
-        return true;
     }
 
     private void report(int token, DocumentFrame doc, String status, boolean ready, byte[] jpeg) {

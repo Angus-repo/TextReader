@@ -33,7 +33,7 @@ final class CardPhoto {
         }
     }
 
-    static CardPhoto load(Context c, Uri uri, boolean checkSample) throws IOException, InterruptedException {
+    static CardPhoto load(Context c, Uri uri) throws IOException {
         Bitmap full=ImageDecoder.decodeBitmap(ImageDecoder.createSource(c.getContentResolver(),uri),(decoder,info,src)->{
             int w=info.getSize().getWidth(),h=info.getSize().getHeight();
             float scale=Math.min(1f,2400f/Math.max(w,h));
@@ -42,11 +42,6 @@ final class CardPhoto {
         });
         Bitmap preview = null;
         try {
-            if (checkSample) {
-                try (DeviceText reader = new DeviceText(c)) {
-                    if (DeviceText.sample(reader.read(full))) return null;
-                }
-            }
             byte[] data = encoded(full, Bitmap.CompressFormat.JPEG, 93);
             float s = Math.min(1f, 960f / Math.max(full.getWidth(), full.getHeight()));
             preview = Bitmap.createScaledBitmap(full, Math.max(1, Math.round(full.getWidth() * s)),

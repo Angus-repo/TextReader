@@ -14,20 +14,14 @@ import com.google.mlkit.vision.text.TextRecognition;
 import com.google.mlkit.vision.text.TextRecognizer;
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.ExecutionException;
-import java.util.regex.Pattern;
 
 final class DeviceText implements AutoCloseable {
-    static final String RULE = "共用規則：即時辨識與相簿選圖都會檢查「樣本」。讀到這兩個字就跳過整張影像，不新增辨識紀錄。分行或中間有空格也適用。";
-    static final String SKIPPED = "已跳過這張影像：偵測到「樣本」，未新增辨識紀錄。";
     static final String UNAVAILABLE = "手機上的 ML Kit 中文辨識尚未就緒。請確認已連網並啟用 Google Play 服務，再重新嘗試。";
     static final String DOWNLOADING = "正在準備 ML Kit 中文辨識模型，請保持網路連線。模型就緒後即可辨識。";
     private final ModuleInstallClient installer;
     private boolean available, requested;
     private long nextCheck;
-    private static final Pattern SAMPLE = Pattern.compile("[樣样][\\s\\p{Z}\\u200B\\uFEFF]*本");
     private final TextRecognizer recognizer = TextRecognition.getClient(new ChineseTextRecognizerOptions.Builder().build());
 
     DeviceText(Context context) { installer = ModuleInstall.getClient(context); }
@@ -53,38 +47,6 @@ final class DeviceText implements AutoCloseable {
         }
         nextCheck = now + 1800;
         throw new IOException(DOWNLOADING);
-    }
-
-    static boolean sample(String text) { return text != null && SAMPLE.matcher(text).find(); }
-
-    static boolean sample(Text text) {
-        if (sample(text.getText())) return true;
-        List<Rect> starts = new ArrayList<>(), ends = new ArrayList<>();
-        for (Text.TextBlock block : text.getTextBlocks()) {
-            for (Text.Line line : block.getLines()) {
-                for (Text.Element word : line.getElements()) {
-                    Rect box = word.getBoundingBox();
-                    if (box == null) continue;
-                    String value = word.getText().trim();
-                    if ("樣".equals(value) || "样".equals(value)) starts.add(box);
-                    if ("本".equals(value)) ends.add(box);
-                }
-            }
-        }
-        // A watermark can be split into two blocks, with unrelated card text
-        // between them in OCR reading order. Compare their physical positions.
-        for (Rect first : starts) for (Rect second : ends)
-            if (alignedGlyphs(first, second)) return true;
-        return false;
-    }
-
-    static boolean alignedGlyphs(Rect first, Rect second) {
-        int em = Math.max(first.height(), second.height());
-        if (em == 0 || Math.min(first.height(), second.height()) < em * .6f) return false;
-        float dx = second.exactCenterX() - first.exactCenterX();
-        float dy = second.exactCenterY() - first.exactCenterY();
-        return (Math.abs(dy) < em * .45f && dx > 0 && dx < em * 5) ||
-               (Math.abs(dx) < em * .45f && dy > 0 && dy < em * 5);
     }
 
     Text read(Bitmap bitmap) throws IOException, InterruptedException {

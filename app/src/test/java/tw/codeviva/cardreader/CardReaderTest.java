@@ -107,7 +107,7 @@ public class CardReaderTest {
             String id;
             try (ReadingHistory store = new ReadingHistory(a)) {
                 id = store.add(new AzureReader.Reading(catalog.cards.get("nhi_front"),"測試輸出",
-                    obj("NhiCardNumber", obj("valueString","000000012345","confidence",0.94))));
+                    obj("NhiCardNumber", obj("valueString","0000樣　本00012345","confidence",0.94))));
             }
             java.lang.reflect.Method m=MainActivity.class.getDeclaredMethod("openReading",String.class);
             m.setAccessible(true);m.invoke(a,id);
@@ -157,7 +157,7 @@ public class CardReaderTest {
             assertEquals(4, fields.length());
             for (int i = 0; i < labels.length; i++) assertEquals(values[i], fields.getString(labels[i]));
             assertFalse(fields.has("性別"));
-            assertEquals(Arrays.asList(lines), jsonStrings(json.getJSONArray("原文逐行")));
+            assertEquals(Arrays.asList(lines).subList(0, lines.length - 1), jsonStrings(json.getJSONArray("原文逐行")));
         }
     }
 
@@ -179,7 +179,7 @@ public class CardReaderTest {
         }
     }
 
-    @Test public void plainIdOcrAlignsPrintedFieldsAndKeepsExactOriginal() throws Exception {
+    @Test public void plainIdOcrAlignsPrintedFieldsAndOmitsOnlyTheWatermark() throws Exception {
         String raw = "中華民國國民身分證\n樣\n本\n4\n姓名\n林\n以\n安\n出生\n年月日\n民國 80 年 2 月 3 日"
             + "\n發證日期\n民國 110 年 5 月 6 日(北市)補發\n性別 女\n統一編號\nA000000001";
         try (ActivityController<MainActivity> ctl = Robolectric.buildActivity(MainActivity.class).setup()) {
@@ -197,7 +197,7 @@ public class CardReaderTest {
             TextView transcript = root.findViewWithTag("transcript-json");
             View container = (View) transcript.getParent();
             JSONArray lines = new JSONObject(transcript.getText().toString()).getJSONArray("原文逐行");
-            assertEquals(Arrays.asList(raw.split("\\n")), jsonStrings(lines));
+            assertEquals(Arrays.asList(raw.replace("樣\n本\n", "").split("\\n")), jsonStrings(lines));
             assertEquals(View.GONE, container.getVisibility());
             find(root, "展開").performClick();
             assertEquals(View.VISIBLE, container.getVisibility());
@@ -235,35 +235,17 @@ public class CardReaderTest {
             assertEquals(LiveScanActivity.class.getName(), intent.getComponent().getClassName());
             Uri uri=intent.getData();assertTrue(CaptureProvider.file(a,uri).isFile());
             assertEquals(0, intent.getFlags() & Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-            ((MainActivity)a).onActivityResult(31, LiveScanActivity.SAMPLE_FOUND, null);
-            assertNotNull(find(a.findViewById(android.R.id.content), DeviceText.SKIPPED));
+            ((MainActivity)a).onActivityResult(31, Activity.RESULT_CANCELED, null);
             assertFalse(CaptureProvider.file(a, uri).exists());
         }
     }
-    @Test public void sampleRuleSkipsSpacedAndVerticalWatermarksAcrossAllTypes() throws Exception {
-        assertTrue(DeviceText.sample("發證日　樣　本"));
-        assertTrue(DeviceText.sample("姓名\n樣\n本\n民國"));
-        assertTrue(DeviceText.sample("样本"));
-        assertFalse(DeviceText.sample("樣式與正本"));
-        assertFalse(DeviceText.sample("本人"));
-        android.graphics.Rect first = new android.graphics.Rect(10, 10, 40, 40);
-        assertTrue(DeviceText.alignedGlyphs(first, new android.graphics.Rect(114, 12, 144, 42)));
-        assertTrue(DeviceText.alignedGlyphs(first, new android.graphics.Rect(10, 84, 40, 114)));
-        assertFalse(DeviceText.alignedGlyphs(first, new android.graphics.Rect(90, 84, 120, 114)));
-        try (ActivityController<OfflineActivity> ctl = Robolectric.buildActivity(OfflineActivity.class).setup()) {
-            OfflineActivity a = ctl.get();
-            a.reader = new AzureReader(catalog, config, (method, url, header, key, body) ->
-                reply(200, null, obj("result", obj("contents", new JSONArray().put(obj("markdown", "文件\n樣 本"))))), ms -> {});
-            setField(a, "config", config);
-            setField(a, "selected", "other");
-            setField(a, "photo", new CardPhoto(android.graphics.Bitmap.createBitmap(4, 4,
-                android.graphics.Bitmap.Config.ARGB_8888), new byte[]{1}));
-            java.lang.reflect.Method read = MainActivity.class.getDeclaredMethod("readText");
-            read.setAccessible(true);
-            read.invoke(a);
-            awaitText(a.findViewById(android.R.id.content), DeviceText.SKIPPED);
-            try (ReadingHistory store = new ReadingHistory(a)) { assertTrue(store.list().isEmpty()); }
-        }
+    @Test public void watermarkFormattingPreservesOtherWordsAndLineBreaks() {
+        assertEquals("林以安", ResultText.forDisplay("林樣　本以安"));
+        assertEquals("編號：0007", ResultText.forDisplay("樣本編號：0007样本"));
+        assertEquals("父\n林甲\n\n母 李乙", ResultText.forDisplay("父\r\n  樣\r\n本　\r\n林甲\r\n\r\n母 李乙"));
+        assertEquals("前段\n後段", ResultText.forDisplay("前段樣\n本後段"));
+        assertEquals("", ResultText.forDisplay("　樣\u200B本　"));
+        assertEquals("本人、同樣、正本與樣張", ResultText.forDisplay("本人、同樣、正本與樣張"));
     }
 
     @Test public void viewfinderUsesQuadrilateralAreaAndStableCorners() {
@@ -378,8 +360,10 @@ public class CardReaderTest {
     }
 
     @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
-    public void liveCropFlowsToBothServicesAndOptionalPreviewPausesUpload() throws Exception {
-        for (boolean review : new boolean[]{false, true}) {
+    public void liveAndGallerySamplesAreClassifiedReadAndSavedWithOriginalText() throws Exception {
+        for (String source : new String[]{"live", "liveWithPreview", "gallery"}) {
+            boolean gallery = source.equals("gallery");
+            boolean review = !source.equals("live");
             try (ActivityController<OfflineActivity> ctl = Robolectric.buildActivity(OfflineActivity.class).setup()) {
                 OfflineActivity activity = ctl.get();
                 setField(activity, "config", config);
@@ -395,19 +379,21 @@ public class CardReaderTest {
                     assertEquals(370, uploaded.getHeight());
                     uploaded.recycle();
                     calls.add("read");
-                    return reply(200,null,obj("result",obj("contents",new JSONArray().put(obj("markdown","裁切文字")))));
+                    return reply(200,null,obj("result",obj("contents",new JSONArray().put(obj("markdown","樣 本\n裁切文字")))));
                 }, ms -> {});
                 View root = activity.findViewById(android.R.id.content);
-                find(root, "即時辨識").performClick();
+                find(root, gallery ? "從相簿選取" : "即時辨識").performClick();
                 org.robolectric.shadows.ShadowActivity.IntentForResult req = Shadows.shadowOf(activity).getNextStartedActivityForResult();
-                java.io.File file = CaptureProvider.file(activity, req.intent.getData());
+                java.io.File file = gallery ? java.io.File.createTempFile("sample", ".jpg", activity.getCacheDir())
+                        : CaptureProvider.file(activity, req.intent.getData());
                 android.graphics.Bitmap crop = android.graphics.Bitmap.createBitmap(600,370,android.graphics.Bitmap.Config.ARGB_8888);
                 crop.eraseColor(android.graphics.Color.WHITE);
                 try (java.io.OutputStream out = new java.io.FileOutputStream(file)) {
                     assertTrue(crop.compress(android.graphics.Bitmap.CompressFormat.JPEG, 95, out));
                 }
                 crop.recycle();
-                activity.onActivityResult(req.requestCode, Activity.RESULT_OK, new Intent().putExtra(LiveScanActivity.REVIEW_CROP, review));
+                Intent result = gallery ? new Intent().setData(Uri.fromFile(file)) : new Intent().putExtra(LiveScanActivity.REVIEW_CROP, review);
+                activity.onActivityResult(req.requestCode, Activity.RESULT_OK, result);
                 if (review) {
                     awaitText(root,"開始辨識");
                     assertTrue(calls.isEmpty());
@@ -415,7 +401,14 @@ public class CardReaderTest {
                 }
                 awaitText(root,"辨識原文（JSON）");
                 assertEquals(Arrays.asList("classify","read"), calls);
-                assertFalse(file.exists());
+                TextView json = root.findViewWithTag("transcript-json");
+                assertEquals(Collections.singletonList("裁切文字"),
+                        jsonStrings(new JSONObject(json.getText().toString()).getJSONArray("原文逐行")));
+                try (ReadingHistory store = new ReadingHistory(activity)) {
+                    assertEquals("樣 本\n裁切文字", store.get(store.list().get(0).id).text);
+                }
+                if (gallery) assertTrue(file.delete());
+                else assertFalse(file.exists());
             }
         }
     }

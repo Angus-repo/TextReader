@@ -213,21 +213,15 @@ public class MainActivity extends Activity {
         if(request!=CAMERA&&request!=GALLERY)return;
         final Uri temp=request==CAMERA?capture:null;
         Uri uri=request==CAMERA?temp:data==null?null:data.getData();
-        if (request == CAMERA && result == LiveScanActivity.SAMPLE_FOUND) {
-            clearCapture(temp);
-            skipped();
-            return;
-        }
         if(result!=RESULT_OK||uri==null){clearCapture(temp);return;}
         final boolean autoRead = request == CAMERA && data != null &&
                 !data.getBooleanExtra(LiveScanActivity.REVIEW_CROP, true);
         selected=null;classified=null;photo=null;error="";fieldMode=0;
         run("正在載入影像…",()->{
             try {
-                return CardPhoto.load(this, uri, request == GALLERY);
+                return CardPhoto.load(this, uri);
             } finally { if(temp!=null)runOnUiThread(()->clearCapture(temp)); }
         }, item -> {
-            if (item == null) { skipped(); return; }
             photo = item;
             if (autoRead && config.ready()) classify();
             else preview();
@@ -322,14 +316,6 @@ public class MainActivity extends Activity {
         return new AzureReader(catalog, config);
     }
 
-    private void skipped() {
-        photo = null;
-        selected = null;
-        classified = null;
-        error = DeviceText.SKIPPED;
-        home();
-    }
-
     private void classify() {
         AzureReader api = createReader();
         Bitmap previewImage = photo.preview;
@@ -366,7 +352,6 @@ public class MainActivity extends Activity {
                 }
             }));
             if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
-            if (DeviceText.sample(reading.text)) return null;
             try {
                 history.add(reading);
             } catch (android.database.SQLException e) {
@@ -374,7 +359,6 @@ public class MainActivity extends Activity {
             }
             return reading;
         }, reading -> {
-            if (reading == null) { skipped(); return; }
             photo = null;
             selected = null;
             classified = null;
@@ -410,7 +394,7 @@ public class MainActivity extends Activity {
     private void rules() {
         ruleEditor = null;
         shell("rules", "辨識規則", this::home);
-        note(content, DeviceText.RULE);
+        note(content, ResultText.RULE);
         ui.gap(content, 8);
         note(content, "選擇一個類型，編輯分類特徵與要讀取的欄位。");
         ui.gap(content, 12);

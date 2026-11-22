@@ -35,6 +35,7 @@ final class ResultLayout {
         page.addView(title);
         ui.gap(page, 16);
 
+        String displayText = ResultText.forDisplay(reading.text);
         List<Row> rows = new ArrayList<>();
         List<String> missing = new ArrayList<>();
         boolean nhi = reading.type.code.equals("nhi_front");
@@ -44,14 +45,14 @@ final class ResultLayout {
             JSONObject definition = reading.type.fields.optJSONObject(i);
             String label = definition.optString("label");
             JSONObject field = reading.fields == null ? null : reading.fields.optJSONObject(definition.optString("key"));
-            String value = field == null || field.isNull("valueString") ? "" : field.optString("valueString").trim();
+            String value = field == null || field.isNull("valueString") ? "" : ResultText.forDisplay(field.optString("valueString")).trim();
             if (!value.isEmpty()) {
                 rows.add(new Row(label, value, field.optDouble("confidence")));
                 cloudValues++;
                 continue;
             }
             if (nhi) {
-                if (local == null) local = OcrRows.from(reading.type, reading.text);
+                if (local == null) local = OcrRows.from(reading.type, displayText);
                 Row candidate = uniqueRow(local, label);
                 if (candidate != null) {
                     rows.add(candidate);
@@ -61,7 +62,7 @@ final class ResultLayout {
             if (reading.fields != null || nhi) missing.add(label);
         }
         if (!nhi && rows.isEmpty()) {
-            rows = OcrRows.from(reading.type, reading.text);
+            rows = OcrRows.from(reading.type, displayText);
             for (Row row : rows) missing.remove(row.label);
         }
 
@@ -78,6 +79,7 @@ final class ResultLayout {
         ui.gap(card, 8);
         if (rows.isEmpty()) {
             String message = reading.text.isEmpty() ? "這張影像未讀到文字。" : "未辨識出可對應的欄位，可展開下方 JSON 查看原文。";
+            if (!reading.text.isEmpty() && displayText.trim().isEmpty()) message = "沒有其他可顯示的文字。";
             card.addView(ui.text(message, 14, MUTED, false));
         } else if (rows.size() > cloudValues) {
             card.addView(ui.text(cloudValues == 0 ? "依原文整理" : "部分欄位依原文整理", 13, MUTED, false));
@@ -95,7 +97,7 @@ final class ResultLayout {
             card.addView(ui.text(String.join("、", missing), 14, MUTED, false));
         }
         ui.gap(page, 12);
-        addTranscript(reading, rows);
+        addTranscript(reading.type.label, displayText, rows);
     }
 
     private static Row uniqueRow(List<Row> rows, String label) {
@@ -146,15 +148,15 @@ final class ResultLayout {
         }
     }
 
-    static String transcriptJson(AzureReader.Reading reading, List<Row> rows) {
+    private static String transcriptJson(String typeLabel, String displayText, List<Row> rows) {
         try {
             JSONObject values = new JSONObject();
             for (Row row : rows) values.accumulate(row.label, row.value);
             JSONArray lines = new JSONArray();
-            if (!reading.text.isEmpty()) {
-                for (String line : reading.text.split("\\r\\n|\\r|\\n", -1)) lines.put(line);
+            if (!displayText.isEmpty()) {
+                for (String line : displayText.split("\\r\\n|\\r|\\n", -1)) lines.put(line);
             }
-            return CardCatalog.obj("文件類型", reading.type.label, "欄位", values, "原文逐行", lines).toString(2);
+            return CardCatalog.obj("文件類型", typeLabel, "欄位", values, "原文逐行", lines).toString(2);
         } catch (JSONException e) {
             throw new IllegalStateException(e);
         }
@@ -175,7 +177,7 @@ final class ResultLayout {
         }
     }
 
-    private void addTranscript(AzureReader.Reading reading, List<Row> rows) {
+    private void addTranscript(String typeLabel, String displayText, List<Row> rows) {
         LinearLayout panel = ui.panel();
         page.addView(panel);
         LinearLayout header = ui.row();
@@ -183,7 +185,7 @@ final class ResultLayout {
         TextView title = ui.text("辨識原文（JSON）", 16, INK, true);
         title.setAccessibilityHeading(true);
         ui.weight(header, title);
-        String json = transcriptJson(reading, rows);
+        String json = transcriptJson(typeLabel, displayText, rows);
         LinearLayout details = ui.col();
         Button toggle = ui.action("展開", false, v -> {
             boolean expand = details.getVisibility() == View.GONE;
