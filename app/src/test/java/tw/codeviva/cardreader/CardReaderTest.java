@@ -747,7 +747,7 @@ public class CardReaderTest {
     }
 
     @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
-    public void liveOutlineKeepsTheInteriorClearAndHighlightsOnlyTheFourCorners() {
+    public void liveOutlineShowsAllFourColoredEdgesAndKeepsTheInteriorClear() {
         android.content.Context context = RuntimeEnvironment.getApplication();
         LiveScanActivity.Outline overlay = new LiveScanActivity.Outline(context);
         int w = 320, h = 200;
@@ -766,12 +766,20 @@ public class CardReaderTest {
             assertEquals(0, image.getPixel(w/2,h/2));
             int shade = android.graphics.Color.alpha(image.getPixel(0,0));
             assertTrue(shade > 0 && shade < 100);
-            int midStroke = 0;
-            for (int y=0; y<h/2; y++) {
-                if (android.graphics.Color.alpha(image.getPixel(w/2,y)) > shade) midStroke++;
-            }
-            assertTrue(midStroke > 0 && midStroke <= Math.ceil(2.1f*density)+2);
             int accent = margin == 34 ? LiveScanActivity.Outline.AMBER : LiveScanActivity.Outline.MINT;
+            for (int side = 0; side < 4; side++) {
+                int strokePixels = 0, accentPixels = 0;
+                int length = side % 2 == 0 ? h : w;
+                for (int offset = 0; offset < length/2; offset++) {
+                    int pos = side < 2 ? offset : length - 1 - offset;
+                    int pixel = side % 2 == 0 ? image.getPixel(w/2,pos) : image.getPixel(pos,h/2);
+                    if (android.graphics.Color.alpha(pixel) > shade) strokePixels++;
+                    if (pixel == accent) accentPixels++;
+                }
+                assertTrue("continuous colored edge " + side, accentPixels >= Math.max(1,(int)(2.6f*density)-1));
+                assertTrue("contrasting edge " + side, strokePixels >= Math.floor(4.4f*density)-1);
+                assertTrue("bounded stroke " + side, strokePixels <= Math.ceil(4.4f*density)+2);
+            }
             for (int i=0; i<8; i+=2) {
                 int cx=Math.round(frame.corners[i]*w), cy=Math.round(frame.corners[i+1]*h);
                 boolean found = false;

@@ -381,7 +381,7 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
     private void message(String s) { if (!s.contentEquals(hint.getText())) hint.setText(s); }
 
     static final class Outline extends View {
-        static final int AMBER = 0xffffc566, MINT = 0xff70e5bd;
+        static final int AMBER = 0xffffc043, MINT = 0xff4ce2a4;
         private static final float INSET = (1f - (float)Math.sqrt(MIN_COVERAGE)) / 2;
         private static final float[] GUIDE = {INSET, INSET, 1-INSET, INSET, 1-INSET, 1-INSET, INSET, 1-INSET};
         private final float density = getResources().getDisplayMetrics().density;
@@ -447,11 +447,11 @@ public final class LiveScanActivity extends Activity implements TextureView.Surf
             int color = 0xffedf6f1;
             if (frame != null) {
                 color = fitsWindow(frame) ? MINT : AMBER;
-                stroke(canvas, border, 0x7430443f, 2.1f);
-                stroke(canvas, border, color, 1.1f);
+                stroke(canvas, border, 0xce21332f, 4.4f);
+                stroke(canvas, border, color, 2.6f);
             }
-            stroke(canvas, brackets, 0x95223532, 4f);
-            stroke(canvas, brackets, color, 2.6f);
+            stroke(canvas, brackets, frame == null ? 0x95223532 : 0xce21332f, frame == null ? 4f : 5.5f);
+            stroke(canvas, brackets, color, frame == null ? 2.6f : 3.7f);
         }
     }
 }
