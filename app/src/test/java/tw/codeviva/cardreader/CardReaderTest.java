@@ -336,7 +336,7 @@ public class CardReaderTest {
                 fieldCount++;
             }
         }
-        assertEquals(62, fieldCount);
+        assertEquals(63, fieldCount);
         try (ActivityController<MainActivity> controller = Robolectric.buildActivity(MainActivity.class).setup()) {
             View root = controller.get().findViewById(android.R.id.content);
             find(root, "辨識規則").performClick();
