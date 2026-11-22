@@ -1,7 +1,12 @@
 package tw.codeviva.cardreader;
 
 import android.content.res.Configuration;
+import android.content.res.ColorStateList;
+import android.graphics.drawable.RippleDrawable;
 import android.view.Gravity;
+import android.view.View;
+import android.view.accessibility.AccessibilityNodeInfo;
+import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import org.json.JSONArray;
@@ -9,7 +14,9 @@ import org.json.JSONObject;
 import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import static tw.codeviva.cardreader.ReaderScreen.*;
 
@@ -44,17 +51,42 @@ final class UsagePanel {
         total.addView(amount);
         card.addView(total);
         ui.gap(card, 14);
-        LinearLayout metrics = stacked ? ui.col() : ui.row();
-        card.addView(metrics);
-        metric(metrics, usage.optBoolean("partialTokens") ? "已回報 Token" : "Token 用量",
-                usage.isNull("tokens") || (usage.optBoolean("partialTokens") && usage.optLong("tokens") == 0)
-                        ? "未完整回報" : count(usage,"tokens"));
-        ui.gap(metrics, 12);
-        metric(metrics, "處理時間", ScanUsage.timeText(usage));
-        JSONArray ops = usage.optJSONArray("operations");
-        if (ops != null) for (int i=0; i<ops.length(); i++) {
-            JSONObject op = ops.optJSONObject(i);
-            if (op != null) operation(card, op);
+        boolean apiTiming = usage.has("apiElapsedMs");
+        LinearLayout tokens = disclosure(card, "Token 用量", tokenText(usage), "tokens");
+        ui.line(card);
+        LinearLayout time = disclosure(card, apiTiming ? "辨識時間" : "舊版處理時間", ScanUsage.timeText(usage), "time");
+        if (!apiTiming) time.addView(ui.text("這筆紀錄只保存整體處理時間，各 API 耗時未記錄。", 14, MUTED, false));
+
+        JSONArray operations = usage.optJSONArray("operations");
+        if (operations == null || operations.length() == 0) {
+            tokens.addView(ui.text("沒有分項用量紀錄。", 14, MUTED, false));
+            if (apiTiming) time.addView(ui.text("沒有 API 呼叫紀錄。", 14, MUTED, false));
+        } else {
+            Map<String, List<JSONObject>> byStage = new LinkedHashMap<>();
+            byStage.put(ScanUsage.DECISIONS, new ArrayList<>());
+            byStage.put(ScanUsage.CONTENT, new ArrayList<>());
+            for (int i = 0; i < operations.length(); i++) {
+                JSONObject op = operations.optJSONObject(i);
+                if (op != null) byStage.computeIfAbsent(op.optString("stage"), key -> new ArrayList<>()).add(op);
+            }
+            for (Map.Entry<String, List<JSONObject>> stageCalls : byStage.entrySet()) {
+                String stage = stageCalls.getKey();
+                List<JSONObject> calls = stageCalls.getValue();
+                if (calls.isEmpty()) {
+                    entry(tokens, stage, apiTiming ? "未呼叫" : "未記錄");
+                    entry(time, stage, apiTiming ? "未呼叫" : "未記錄");
+                }
+                for (int i = 0; i < calls.size(); i++) {
+                    JSONObject op = calls.get(i);
+                    String name = calls.size() > 1 ? stage + "（第 " + (i + 1) + " 次）" : stage;
+                    entry(tokens, name, op.optLong("tokens", -1) == 0 && op.has("pages") && !op.optBoolean("partialTokens")
+                            ? "按頁計量" : tokenText(op));
+                    model(tokens, op);
+                    tokenDetails(tokens, op);
+                    entry(time, name, apiTiming ? ScanUsage.timeText(op) : "未記錄");
+                    model(time, op);
+                }
+            }
         }
         ui.gap(card, 12);
         ui.line(card);
@@ -64,12 +96,52 @@ final class UsagePanel {
         return card;
     }
 
-    private void metric(LinearLayout group, String label, String value) {
-        LinearLayout cell = ui.col();
-        cell.addView(ui.text(label, 13, MUTED, false));
-        ui.gap(cell, 3);
-        cell.addView(ui.text(value, 18, INK, true));
-        if (stacked) group.addView(cell); else ui.weight(group, cell);
+    private LinearLayout disclosure(LinearLayout card, String label, String value, String key) {
+        LinearLayout toggle = ui.row();
+        toggle.setTag("usage-" + key + "-toggle");
+        toggle.setMinimumHeight(ui.dp(56));
+        toggle.setFocusable(true);
+        toggle.setBackground(new RippleDrawable(ColorStateList.valueOf(0x241e8a73), ui.bg(WHITE, 8, false), null));
+        ui.pad(toggle, 3, 5);
+        TextView name = ui.text(label, 15, INK, true);
+        ui.weight(toggle, name);
+        TextView number = ui.text(value, 17, GREEN, true);
+        toggle.addView(number);
+        ui.gap(toggle, 10);
+        TextView arrow = ui.text("▾", 20, GREEN, true);
+        toggle.addView(arrow);
+        card.addView(toggle);
+        LinearLayout details = ui.col();
+        details.setTag("usage-" + key + "-details");
+        ui.pad(details, 8, 8);
+        details.setVisibility(View.GONE);
+        card.addView(details);
+        String description = label + "，" + value + "，";
+        toggle.setContentDescription(description + "展開明細");
+        toggle.setAccessibilityDelegate(new View.AccessibilityDelegate() {
+            @Override public void onInitializeAccessibilityNodeInfo(View host, AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(host, info);
+                info.setClassName(Button.class.getName());
+            }
+        });
+        toggle.setOnClickListener(v -> {
+            boolean expand = details.getVisibility() != View.VISIBLE;
+            details.setVisibility(expand ? View.VISIBLE : View.GONE);
+            arrow.setText(expand ? "▴" : "▾");
+            toggle.setContentDescription(description + (expand ? "收合明細" : "展開明細"));
+        });
+        return details;
+    }
+
+    private static String tokenText(JSONObject op) {
+        if (op.isNull("tokens") || (op.optBoolean("partialTokens") && op.optLong("tokens") == 0))
+            return "未完整回報";
+        return (op.optBoolean("partialTokens") ? "已知 " : "") + count(op, "tokens");
+    }
+
+    private void model(LinearLayout group, JSONObject op) {
+        String name = op.optString("model", op.optString("analyzer"));
+        if (!name.isEmpty()) group.addView(ui.text(name, 13, MUTED, false));
     }
 
     private static String money(JSONObject obj) {
@@ -80,20 +152,22 @@ final class UsagePanel {
         return NumberFormat.getIntegerInstance(Locale.TAIWAN).format(obj.optLong(key));
     }
 
-    private void operation(LinearLayout card, JSONObject op) {
-        ui.gap(card, 12);
-        ui.line(card);
-        ui.gap(card, 10);
-        String stage = op.optString("stage");
-        if ("Decisions 分類".equals(stage)) stage = "影像分類";
-        else if ("Content Understanding 讀取".equals(stage)) stage = "文字與欄位讀取";
+    private void entry(LinearLayout group, String stage, String value) {
+        if (group.getChildCount() > 0) {
+            ui.gap(group, 10);
+            ui.line(group);
+            ui.gap(group, 10);
+        }
         LinearLayout heading = stacked ? ui.col() : ui.row();
-        card.addView(heading);
+        group.addView(heading);
         TextView name = ui.text(stage, 15, INK, true);
         if (stacked) heading.addView(name); else ui.weight(heading, name);
-        TextView amount = ui.text(money(op), 15, INK, true);
+        TextView amount = ui.text(value, 15, INK, true);
         amount.setGravity(stacked ? Gravity.START : Gravity.END);
         heading.addView(amount);
+    }
+
+    private void tokenDetails(LinearLayout card, JSONObject op) {
         List<String> parts = new ArrayList<>();
         if (op.has("input")) parts.add("輸入 " + count(op,"input"));
         if (op.has("output")) parts.add("輸出 " + count(op,"output"));
@@ -111,5 +185,8 @@ final class UsagePanel {
             Collections.sort(names);
             for (String key : names) card.addView(ui.text(key + "　" + count(models,key) + " tokens", 13, MUTED, false));
         }
+        ui.gap(card, 4);
+        String costLabel = op.has("usd") && !op.optBoolean("priced", true) ? "已知費用小計 " : "預估費用 ";
+        card.addView(ui.text(costLabel + money(op), 13, MUTED, false));
     }
 }

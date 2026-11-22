@@ -337,11 +337,7 @@ public class MainActivity extends Activity {
         AzureReader api = createReader();
         Bitmap previewImage = photo.preview;
         api.usage = photo.usage;
-        run("Decisions 正在辨識影像類型…", () -> {
-            long start = android.os.SystemClock.elapsedRealtime();
-            try { return api.classify(previewImage); }
-            finally { api.usage.activeMillis += android.os.SystemClock.elapsedRealtime() - start; }
-        }, code -> {
+        run("Decisions 正在辨識影像類型…", () -> api.classify(previewImage), code -> {
             classified = code;
             selected = code;
             if (confirmType) preview();
@@ -368,21 +364,15 @@ public class MainActivity extends Activity {
         boolean fields = fieldMode == 1 || (fieldMode == 0 && type.autoFields);
         int token = sequence + 1;
         run("正在讀取" + type.label + "的文字…", () -> {
-            long start = android.os.SystemClock.elapsedRealtime();
-            AzureReader.Reading reading;
-            try {
-                reading = api.read(type, bytes, fields, message -> runOnUiThread(() -> {
-                    if (sequence == token && busy && !isDestroyed()) {
-                        status = message;
-                        preview();
-                    }
-                }));
-                if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
-                IdCardDetails.readImage(this, reading, bytes);
-                if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
-            } finally {
-                api.usage.activeMillis += android.os.SystemClock.elapsedRealtime() - start;
-            }
+            AzureReader.Reading reading = api.read(type, bytes, fields, message -> runOnUiThread(() -> {
+                if (sequence == token && busy && !isDestroyed()) {
+                    status = message;
+                    preview();
+                }
+            }));
+            if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
+            IdCardDetails.readImage(this, reading, bytes);
+            if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
             reading.usage = api.usage.snapshot();
             try {
                 return history.add(reading);

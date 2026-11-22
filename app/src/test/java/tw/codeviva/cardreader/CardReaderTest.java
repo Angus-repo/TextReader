@@ -30,11 +30,10 @@ public class CardReaderTest {
     @Test public void sumsAzureDecisionAndDocumentMetersWithoutCountingCacheOrPagesAsExtraModelTokens() throws Exception {
         ScanUsage use = new ScanUsage();
         config.openAI = true;
-        ScanUsage.decision(use.begin("分類"), obj("usage", obj("input_tokens",1000,"output_tokens",0,"total_tokens",1000,
+        ScanUsage.decision(use.begin(ScanUsage.DECISIONS).put("apiElapsedMs", 800), obj("usage", obj("input_tokens",1000,"output_tokens",0,"total_tokens",1000,
                 "input_tokens_details",obj("cached_tokens",200,"cache_write_tokens",100))), config);
-        ScanUsage.document(use.begin("讀取"), obj("documentPagesStandard",1,"contextualizationTokens",1000,
+        ScanUsage.document(use.begin(ScanUsage.CONTENT).put("apiElapsedMs", 2000), obj("documentPagesStandard",1,"contextualizationTokens",1000,
                 "tokens",obj("gpt-5.2-input",1000,"gpt-5.2-output",100,"text-embedding-3-large",1000)), true,"custom",config);
-        use.activeMillis = 2800;
         JSONObject saved = use.snapshot();
         assertEquals(4100, saved.getLong("tokens"));
         // Classification 0.0000845, page 0.005, context 0.001, generation 0.00315, embedding 0.00013.
@@ -87,8 +86,8 @@ public class CardReaderTest {
         try (ReadingHistory store = new ReadingHistory(ctx)) {
             assertEquals(ScanUsage.LEGACY,store.list().get(0).usageSummary);
             assertEquals("舊原文",store.get(id).text);
-            ScanUsage use = new ScanUsage(); use.activeMillis=3320;
-            ScanUsage.document(use.begin("文字"),obj("documentPagesBasic",1),false,"prebuilt-read",config);
+            ScanUsage use = new ScanUsage();
+            ScanUsage.document(use.begin(ScanUsage.CONTENT).put("apiElapsedMs",3320),obj("documentPagesBasic",1),false,"prebuilt-read",config);
             AzureReader.Reading reading = new AzureReader.Reading(catalog.cards.get("other"),"新的原文",null);
             reading.usage = use.snapshot();
             String added = store.add(reading);
@@ -173,13 +172,92 @@ public class CardReaderTest {
         }
     }
 
-    @Test public void usageCardShowsSeparateCostTimeAndTokenValuesAndPartialPricing() throws Exception {
-        JSONObject op = obj("stage","Decisions 分類","input",1071,"output",1,"usd","0.000044982");
-        JSONObject usage = obj("tokens",1072,"elapsedMs",5420,"usd","0.001044982","partialCost",true,
-                "operations",new JSONArray().put(op),"rateBasis","參考單價");
+    private static void advanceMs(long ms) {
+        org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMillis(ms));
+    }
+
+    @Test public void timeStartsAtInferenceDispatchAndEndsAtFinalPollForEachAttempt() throws Exception {
+        int[] decisionCalls = {0}, polls = {0};
+        AzureReader api = new AzureReader(catalog,config,(method,url,header,key,body) -> {
+            if (url.endsWith(tw.codeviva.cardreader.Config.MS)) {
+                if (decisionCalls[0]++ == 0) { advanceMs(250); throw new IOException("timeout"); }
+                advanceMs(750);
+                return reply(200,null,obj("answers",obj(AzureReader.QUESTION,obj("type","choice","choice","id_front"))));
+            }
+            if (method.equals("GET") && !url.equals(OP)) {
+                advanceMs(15000); // Checking the custom analyzer is outside the inference window.
+                return reply(200,null,obj("status","ready"));
+            }
+            if (method.equals("POST")) { advanceMs(300); return reply(202,OP,obj()); }
+            advanceMs(100);
+            if (polls[0]++ == 0) return reply(429,null,obj());
+            return reply(200,null,obj("status","Succeeded","result",obj("contents",new JSONArray().put(obj("markdown","文字")))));
+        }, CardReaderTest::advanceMs);
+        android.graphics.Bitmap image = android.graphics.Bitmap.createBitmap(10,10,android.graphics.Bitmap.Config.ARGB_8888);
+        try {
+            try { api.classify(image); fail(); } catch (IOException expected) { assertEquals("timeout",expected.getMessage()); }
+            advanceMs(5000);
+            assertEquals("id_front",api.classify(image));
+            advanceMs(60000);
+            api.read(catalog.cards.get("id_front"),new byte[]{1},true,msg -> advanceMs(5000));
+            advanceMs(10000); // Local work after the response.
+            JSONObject usage = api.usage.snapshot();
+            JSONArray ops = usage.getJSONArray("operations");
+            assertEquals(250,ops.getJSONObject(0).getLong("apiElapsedMs"));
+            assertEquals(750,ops.getJSONObject(1).getLong("apiElapsedMs"));
+            // Analyze POST (300), two one-second waits and two GETs (100 each).
+            assertEquals(2500,ops.getJSONObject(2).getLong("apiElapsedMs"));
+            assertEquals(3500,usage.getLong("apiElapsedMs"));
+            assertEquals(ScanUsage.CONTENT,ops.getJSONObject(2).getString("stage"));
+            assertEquals(config.cuModel,ops.getJSONObject(2).getString("model"));
+        } finally { image.recycle(); }
+    }
+
+    @Test public void usageArrowsIndependentlyExpandAndCollapseBothServices() throws Exception {
+        JSONObject decision = obj("stage",ScanUsage.DECISIONS,"model","my-decision","input",1071,"output",1,
+                "tokens",1072,"apiElapsedMs",1000,"usd","0.000044982");
+        JSONObject read = obj("stage",ScanUsage.CONTENT,"analyzer","prebuilt-read","tokens",0,
+                "pages",1,"apiElapsedMs",4420,"usd","0.001");
+        JSONObject usage = obj("tokens",1072,"apiElapsedMs",5420,"usd","0.001044982","partialCost",true,
+                "operations",new JSONArray().put(decision).put(read),"rateBasis","參考單價");
         View card = new UsagePanel(new ReaderScreen(RuntimeEnvironment.getApplication())).show(usage);
-        for (String label : new String[]{"已知費用小計","US$0.001044982","Token 用量","1,072","處理時間",
-                "5.42 秒","影像分類","US$0.000044982","參考單價"}) assertNotNull(label,find(card,label));
+        View tokens = card.findViewWithTag("usage-tokens-details"), time = card.findViewWithTag("usage-time-details");
+        View tokenButton = card.findViewWithTag("usage-tokens-toggle"), timeButton = card.findViewWithTag("usage-time-toggle");
+        assertEquals(View.GONE,tokens.getVisibility()); assertEquals(View.GONE,time.getVisibility());
+        assertNotNull(find(card,"5.42 秒")); assertNotNull(find(card,"已知費用小計"));
+        tokenButton.performClick();
+        assertEquals(View.VISIBLE,tokens.getVisibility()); assertEquals(View.GONE,time.getVisibility());
+        for (String text : new String[]{ScanUsage.DECISIONS,ScanUsage.CONTENT,"my-decision","prebuilt-read",
+                "輸入 1,071  ·  輸出 1","按頁計量","1 頁","預估費用 US$0.001"}) assertNotNull(text,find(tokens,text));
+        timeButton.performClick();
+        assertEquals(View.VISIBLE,time.getVisibility());
+        assertNotNull(find(time,"1.00 秒")); assertNotNull(find(time,"4.42 秒"));
+        assertNotNull(find(time,ScanUsage.DECISIONS)); assertNotNull(find(time,ScanUsage.CONTENT));
+        tokenButton.performClick();
+        assertEquals(View.GONE,tokens.getVisibility()); assertEquals(View.VISIBLE,time.getVisibility());
+        timeButton.performClick(); assertEquals(View.GONE,time.getVisibility());
+    }
+
+    @Test public void historicalOverallTimeDoesNotBecomeApiTimeWhenOpenedOrImported() throws Exception {
+        JSONObject old = obj("elapsedMs",5090,"tokens",1072,"operations",new JSONArray()
+                .put(obj("stage",ScanUsage.DECISIONS,"tokens",1072,"input",1071,"output",1)));
+        AzureReader.Reading reading = new AzureReader.Reading(catalog.cards.get("other"),"舊資料",null);
+        reading.usage = old;
+        try (ReadingHistory db = new ReadingHistory(RuntimeEnvironment.getApplication())) {
+            String id = db.add(reading);
+            db.getWritableDatabase().execSQL("UPDATE readings SET usage_summary=? WHERE id=?",
+                    new Object[]{"1,072 tokens · 5.09 秒 · 估計 US$0.001",id});
+            assertTrue(db.list().get(0).usageSummary.contains("舊版處理 5.09 秒"));
+            java.io.ByteArrayOutputStream backup = new java.io.ByteArrayOutputStream();
+            db.exportTo(backup); db.clear(); db.importFrom(new java.io.ByteArrayInputStream(backup.toByteArray()));
+            JSONObject restored = db.get(id).usage;
+            assertFalse(restored.has("apiElapsedMs"));
+            View card = new UsagePanel(new ReaderScreen(RuntimeEnvironment.getApplication())).show(restored);
+            assertNotNull(find(card,"舊版處理時間")); assertNotNull(find(card,"5.09 秒"));
+            card.findViewWithTag("usage-time-toggle").performClick();
+            assertNotNull(find(card.findViewWithTag("usage-time-details"),"這筆紀錄只保存整體處理時間，各 API 耗時未記錄。"));
+            assertNull(find(card.findViewWithTag("usage-time-details"),"5.09 秒"));
+        }
     }
 
     @Test public void bothDecisionContractsIncludeEveryType() throws Exception {
@@ -811,7 +889,7 @@ public class CardReaderTest {
                     JSONObject usage = db.get(entry.id).usage;
                     assertEquals(1000, usage.getLong("tokens"));
                     assertEquals("0.005042", usage.getString("usd"));
-                    assertTrue(usage.getLong("elapsedMs") < 600000);
+                    assertTrue(usage.getLong("apiElapsedMs") < 600000);
                     activity.onBackPressed();
                     assertNotNull(find(root, entry.usageSummary));
                 }

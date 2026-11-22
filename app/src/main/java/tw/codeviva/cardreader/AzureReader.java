@@ -22,7 +22,17 @@ final class AzureReader {
     ScanUsage usage = new ScanUsage();
     interface Progress { void show(String message); }
     interface Sleeper { void pause(long ms) throws InterruptedException; }
-    interface Transport { Reply call(String method,String url,String header,String key,JSONObject data) throws Exception; }
+    interface Transport {
+        Reply call(String method,String url,String header,String key,JSONObject data) throws Exception;
+
+        default Reply callTimed(String method, String url, String header, String key, JSONObject data,
+                                ScanUsage.ApiWindow timer) throws Exception {
+            if (timer == null) return call(method, url, header, key, data);
+            timer.sending();
+            try { return call(method, url, header, key, data); }
+            finally { timer.received(); }
+        }
+    }
     static final class Reply {
         final int code; final String location; final int seconds; final JSONObject body;
         final String requestId;
@@ -82,20 +92,35 @@ final class AzureReader {
     }
     static final class Network implements Transport {
         public Reply call(String method,String url,String header,String key,JSONObject data) throws Exception {
+            return callTimed(method, url, header, key, data, null);
+        }
+
+        @Override public Reply callTimed(String method, String url, String header, String key, JSONObject data,
+                                         ScanUsage.ApiWindow timer) throws Exception {
             if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
             HttpsURLConnection c=(HttpsURLConnection)new URL(url).openConnection();
             try {
                 c.setInstanceFollowRedirects(false); c.setUseCaches(false);
                 c.setConnectTimeout(15000); c.setReadTimeout(65000); c.setRequestMethod(method);
                 c.setRequestProperty(header,key); c.setRequestProperty("Accept","application/json");
-                if(data!=null) {
-                    byte[] bytes=data.toString().getBytes(StandardCharsets.UTF_8);
-                    c.setDoOutput(true); c.setRequestProperty("Content-Type","application/json");
+                byte[] bytes = data == null ? null : data.toString().getBytes(StandardCharsets.UTF_8);
+                if (bytes != null) {
+                    c.setDoOutput(true);
+                    c.setRequestProperty("Content-Type","application/json");
                     c.setFixedLengthStreamingMode(bytes.length);
-                    try(OutputStream out=c.getOutputStream()){out.write(bytes);}
                 }
-                int status=c.getResponseCode(); String raw;
-                try(InputStream in=status>=400?c.getErrorStream():c.getInputStream()){raw=CardCatalog.read(in,8*1024*1024);}
+                int status;
+                String raw;
+                if (timer != null) timer.sending();
+                try {
+                    if (bytes != null) try (OutputStream out = c.getOutputStream()) { out.write(bytes); }
+                    status = c.getResponseCode();
+                    try (InputStream in = status >= 400 ? c.getErrorStream() : c.getInputStream()) {
+                        raw = CardCatalog.read(in, 8 * 1024 * 1024);
+                    }
+                } finally {
+                    if (timer != null) timer.received();
+                }
                 JSONObject result=new JSONObject();
                 if(!raw.trim().isEmpty()) {
                     try {result=new JSONObject(raw);} catch(JSONException e) {
@@ -136,9 +161,10 @@ final class AzureReader {
     }
     String classify(Bitmap preview) throws Exception {
         byte[] image = config.openAI ? CardPhoto.encoded(preview, Bitmap.CompressFormat.PNG, 100) : CardPhoto.decisionJpeg(preview);
-        JSONObject op = usage.begin("Decisions 分類");
-        Reply r=transport.call("POST",config.decisionRoot+(config.openAI?Config.OA:Config.MS),"api-key",config.decisionKey,
-            decisionBody(Base64.encodeToString(image,Base64.NO_WRAP)));
+        JSONObject request = decisionBody(Base64.encodeToString(image, Base64.NO_WRAP));
+        JSONObject op = usage.begin(ScanUsage.DECISIONS).put("model", config.model);
+        Reply r = transport.callTimed("POST", config.decisionRoot + (config.openAI ? Config.OA : Config.MS),
+                "api-key", config.decisionKey, request, new ScanUsage.ApiWindow(op));
         ScanUsage.decision(op, r.body, config);
         if (r.code < 200 || r.code >= 300) throw new IOException(classificationError(r, config.decisionKey));
         return readChoice(r.body);
@@ -178,14 +204,14 @@ final class AzureReader {
             throw new IOException("Azure 作業回傳的查詢位置不屬於設定的資源。");
         return next.toString();
     }
-    JSONObject waitFor(Reply initial,String stage,boolean requireResult) throws Exception {
+    JSONObject waitFor(Reply initial,String stage,boolean requireResult, ScanUsage.ApiWindow timer) throws Exception {
         initial.check(stage);
         if (initial.location==null && initial.code!=202 && (!requireResult || initial.body.has("result"))) return initial.body;
         String url=operationUrl(initial.location); Reply current=initial;
         long deadline=System.nanoTime()+300_000_000_000L;
         while(System.nanoTime()<deadline) {
             sleeper.pause(Math.min(current.seconds,60)*1000L);
-            current=cu("GET",url,null);
+            current=transport.callTimed("GET",url,"Ocp-Apim-Subscription-Key",config.cuKey,null,timer);
             if(current.code==429 || current.code==502 || current.code==503 || current.code==504) continue;
             current.check(stage);
             switch(current.body.optString("status").toLowerCase(Locale.ROOT)) {
@@ -202,7 +228,7 @@ final class AzureReader {
         if(existing.code==404) {
             p.show("首次建立"+card.label+"分析器…");
             Reply create=cu("PUT",url+VERSION+"&allowReplace=false",card.schema(config.cuModel));
-            if(create.code!=409) {waitFor(create,"建立分析器失敗",false);return;}
+            if(create.code!=409) {waitFor(create,"建立分析器失敗",false,null);return;}
             existing=cu("GET",url+VERSION,null);
         }
         for(int i=0;i<60;i++) {
@@ -248,10 +274,13 @@ final class AzureReader {
         progress.show("正在讀取" + type.label + "的文字…");
         JSONObject input = obj("name", "scan.jpg", "mimeType", "image/jpeg",
             "data", Base64.encodeToString(jpeg, Base64.NO_WRAP));
-        JSONObject op = usage.begin("Content Understanding 讀取");
-        Reply start = cu("POST", base + analyzer + ":analyze" + VERSION,
-            obj("inputs", new JSONArray().put(input)));
-        JSONObject operation = waitFor(start, "文字讀取失敗", true);
+        JSONObject request = obj("inputs", new JSONArray().put(input));
+        JSONObject op = usage.begin(ScanUsage.CONTENT).put("analyzer", analyzer);
+        if (structured) op.put("model", config.cuModel);
+        ScanUsage.ApiWindow timer = new ScanUsage.ApiWindow(op);
+        Reply start = transport.callTimed("POST", base + analyzer + ":analyze" + VERSION,
+                "Ocp-Apim-Subscription-Key", config.cuKey, request, timer);
+        JSONObject operation = waitFor(start, "文字讀取失敗", true, timer);
         JSONObject result = operation.getJSONObject("result");
         JSONObject meters = operation.optJSONObject("usage");
         ScanUsage.document(op, meters == null ? result.optJSONObject("usage") : meters, structured, analyzer, config);

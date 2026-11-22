@@ -16,9 +16,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import static tw.codeviva.cardreader.CardCatalog.obj;
 
 final class ReadingHistory extends SQLiteOpenHelper {
+    private static final Pattern LEGACY_TIME = Pattern.compile(" · (?=[0-9]+[.][0-9]{2} 秒 · )");
     private static final String FORMAT = "TextReader.history.v1";
 
     ReadingHistory(Context context) {
@@ -39,7 +41,8 @@ final class ReadingHistory extends SQLiteOpenHelper {
             id = row.getString(0);
             label = row.getString(1);
             time = row.getLong(2);
-            usageSummary = row.isNull(3) ? ScanUsage.LEGACY : row.getString(3);
+            // Version 1.6.0/1.6.1 cached overall time as an unlabeled seconds value.
+            usageSummary = row.isNull(3) ? ScanUsage.LEGACY : LEGACY_TIME.matcher(row.getString(3)).replaceFirst(" · 舊版處理 ");
         }
     }
 

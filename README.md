@@ -2,7 +2,7 @@
 
 TextReader 是一個 Android 影像文字讀取工具。即時裁切文件或從相簿選圖後，由 Azure Decisions 判斷影像類型，再由 Azure Content Understanding 讀取全文。結果自動儲存在手機的「辨識紀錄」，同類型的多筆結果可分別開啟。
 
-**[下載 TextReader 1.6.1 APK](https://github.com/Angus-repo/TextReader/raw/refs/heads/main/apk/TextReader-1.6.1.apk)**。支援 Android 9 以上，沿用 1.0.0「台灣證件讀取」的套件名稱、簽署憑證與連線設定。
+**[下載 TextReader 1.6.2 APK](https://github.com/Angus-repo/TextReader/raw/refs/heads/main/apk/TextReader-1.6.2.apk)**。支援 Android 9 以上，沿用 1.0.0「台灣證件讀取」的套件名稱、簽署憑證與連線設定。
 
 ## 使用方式
 
@@ -17,7 +17,7 @@ TextReader 是一個 Android 影像文字讀取工具。即時裁切文件或從
 
 ## 辨識用量與費用
 
-首頁每筆紀錄列出本次已回報的 token 數、處理耗時及美元估價。點開紀錄後，上方以大字顯示費用，接著列出 Token 用量與處理時間，下方依服務列出各筆金額與用量。計時涵蓋同張圖的分類、分析器準備、雲端輪詢、重試與手機補讀，排除手動選擇類型時的等待。舊紀錄顯示「未記錄」。匯出與匯入會保留當時的用量和估價。
+首頁每筆紀錄列出 Token、API 耗時與美元估價。結果頁保留費用總額，點「Token 用量」或「辨識時間」旁的箭頭即可分別展開 Decisions 分類與 Content Understanding 讀取的明細。Token 明細列出模型回報的用量、頁數與費用。辨識時間是兩組 API 耗時的合計，從各自送出請求計至收到最終回應，包含等待 Content Understanding 分析完成的輪詢時間。重試按次列出。圖片準備、建立分析器、手動確認、手機端 OCR 與條碼補掃均不計入。舊紀錄保留當時的處理時間，新紀錄的分項耗時也會隨備份保存。
 
 費用採 2026-11-22 查核的 Global Standard 美元參考價。Microsoft Decision 1.1、Azure OpenAI Decisions、OCR 頁數、情境 token、GPT-5.2 與 text-embedding-3-large 依各自的計價項目計算。只讀一張照片且 Azure 缺少頁數時，依當次 Read 或 Layout 估算一頁並標示。缺少用量或模型單價時顯示已知小計。部署在不同區域或有議價折扣時，可於「連線設定 → 估算費用單價」填入模型費率。實際扣款以 Azure 帳單為準。
 

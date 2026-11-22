@@ -15,7 +15,23 @@ import static tw.codeviva.cardreader.CardCatalog.obj;
 final class ScanUsage {
     static final String LEGACY = "Token、耗時與費用未記錄";
     private final JSONArray operations = new JSONArray();
-    long activeMillis;
+    static final String DECISIONS = "Decisions 分類", CONTENT = "Content Understanding 讀取";
+
+    /** The initial POST and every status poll share one monotonic interval. */
+    static final class ApiWindow {
+        private final JSONObject operation;
+        private long firstSend = -1;
+
+        ApiWindow(JSONObject operation) { this.operation = operation; }
+
+        void sending() {
+            if (firstSend < 0) firstSend = android.os.SystemClock.elapsedRealtime();
+        }
+
+        void received() throws JSONException {
+            operation.put("apiElapsedMs", android.os.SystemClock.elapsedRealtime() - firstSend);
+        }
+    }
 
     JSONObject begin(String name) throws JSONException {
         JSONObject op = obj("stage", name);
@@ -123,17 +139,18 @@ final class ScanUsage {
     }
 
     JSONObject snapshot() throws JSONException {
-        long total = 0;
+        long total = 0, apiMillis = 0;
         boolean anyTokens = false, incompleteTokens = false, anyCost = false, incompleteCost = false;
         BigDecimal usd = BigDecimal.ZERO;
         for (int i=0; i<operations.length(); i++) {
             JSONObject op = operations.getJSONObject(i);
+            apiMillis += op.optLong("apiElapsedMs");
             if (op.has("tokens")) { total += op.getLong("tokens"); anyTokens = true; }
             incompleteTokens |= !op.has("tokens") || op.optBoolean("partialTokens");
             if (op.has("usd")) { usd = usd.add(new BigDecimal(op.getString("usd"))); anyCost = true; }
             incompleteCost |= !op.optBoolean("priced");
         }
-        JSONObject result = obj("elapsedMs", activeMillis, "partialTokens", incompleteTokens, "partialCost", incompleteCost,
+        JSONObject result = obj("apiElapsedMs", apiMillis, "partialTokens", incompleteTokens, "partialCost", incompleteCost,
                 "rateBasis", "Global Standard 參考價（2026-11-22），自訂單價優先", "operations", new JSONArray(operations.toString()));
         if (anyTokens) result.put("tokens", total);
         if (anyCost) result.put("usd", usd.stripTrailingZeros().toPlainString());
@@ -145,13 +162,14 @@ final class ScanUsage {
         String tokens = usage.has("tokens") ? (usage.optBoolean("partialTokens") ? "已知 " : "")
                 + NumberFormat.getIntegerInstance(Locale.TAIWAN).format(usage.optLong("tokens")) + " tokens" : "Token 未回報";
         if (usage.optBoolean("partialTokens") && usage.optLong("tokens", 0) == 0) tokens = "Token 未完整回報";
-        String time = timeText(usage);
+        String time = (usage.has("apiElapsedMs") ? "API " : "舊版處理 ") + timeText(usage);
         String price = usage.has("usd") ? (usage.optBoolean("partialCost") ? "已知小計 " : "估計 ")
                 + "US$" + usage.optString("usd") : "費用未取得";
         return tokens + " · " + time + " · " + price;
     }
 
     static String timeText(JSONObject usage) {
-        return String.format(Locale.TAIWAN, "%.2f 秒", usage.optLong("elapsedMs") / 1000.0);
+        long millis = usage.optLong("apiElapsedMs", usage.optLong("elapsedMs", -1));
+        return millis < 0 ? "未記錄" : String.format(Locale.TAIWAN, "%.2f 秒", millis / 1000.0);
     }
 }
