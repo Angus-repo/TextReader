@@ -1,15 +1,17 @@
 # TextReader
 
-TextReader 是一個 Android 影像文字讀取工具。拍照或從相簿選圖後，由 Azure Decisions 判斷影像類型，再由 Azure Content Understanding 讀取全文。結果保留在本次掃描清單，同類型的多筆結果可分別開啟。
+TextReader 是一個 Android 影像文字讀取工具。拍照或從相簿選圖後，由 Azure Decisions 判斷影像類型，再由 Azure Content Understanding 讀取全文。結果自動儲存在手機的「辨識紀錄」，同類型的多筆結果可分別開啟。
 
-**[下載 TextReader 1.2.4 APK](https://github.com/Angus-repo/TextReader/raw/refs/heads/main/apk/TextReader-1.2.4.apk)**。支援 Android 9 以上，沿用 1.0.0「台灣證件讀取」的套件名稱、簽署憑證與連線設定。
+**[下載 TextReader 1.3.0 APK](https://github.com/Angus-repo/TextReader/raw/refs/heads/main/apk/TextReader-1.3.0.apk)**。支援 Android 9 以上，沿用 1.0.0「台灣證件讀取」的套件名稱、簽署憑證與連線設定。
 
 ## 使用方式
 
 1. 在「連線設定」選擇 Microsoft Decision 1.1 或 Azure OpenAI Decisions，填入 Azure 公有雲資源端點、實際部署名稱及金鑰。
 2. 填入 Content Understanding 資源端點與金鑰。全文辨識使用內建 OCR 分析器，可直接開始掃描。
 3. 點「拍照」或「從相簿選取」，預覽後按「開始辨識」。預設會依序完成分類與 OCR。勾選「讀取前讓我確認分類」即可在兩步之間更正類型。若分類失敗，保留同張照片，點「手動選擇類型」後按「讀取文字」即可繼續。
-4. 結果頁優先顯示已擷取的欄位與信心值。只讀全文時，App 會在手機上依可辨識的欄名整理內容，點「辨識原文」旁的「展開」可核對並選取原文。沒有可整理的欄位時，直接顯示全文。回首頁可開啟本次其他結果或清除整批資料。
+4. 結果頁會列出已擷取的欄位與信心值。展開「辨識原文（JSON）」可查看文件類型、欄位及逐行 OCR 原文，點「複製 JSON」可複製完整內容。無具名欄位時直接顯示 JSON。
+5. 在首頁的「辨識紀錄」可開啟歷史結果。同一套件及簽署金鑰覆蓋安裝 APK 時會沿用紀錄。1.2.4 及之前的版本僅暫存於記憶體，目前無可遷移的歷史檔案。
+6. 如要先解除安裝，先在首頁點「匯出備份」，選擇保存位置。備份是明文 JSON，含原文、當時的欄位規則及擷取結果。完成重裝後點「匯入備份」，可合併還原並略過重複紀錄。系統若在解除安裝時提供「保留應用程式資料」，也可以勾選。
 
 ## 依描述設定辨識規則
 
@@ -33,7 +35,7 @@ TextReader 是一個 Android 影像文字讀取工具。拍照或從相簿選圖
 
 ## 資料處理
 
-App 支援系統截圖。上傳於使用者按下「開始辨識」後執行。縮圖傳送至 Decisions，重新編碼的影像傳送至 Content Understanding。App 在記憶體保留本次結果，結束程序即清除。相機暫存檔於載入後刪除，連線設定由 Android Keystore 提供的 AES-GCM 金鑰加密，停用系統自動備份。
+App 支援系統截圖。上傳於使用者按下「開始辨識」後執行。縮圖傳送至 Decisions，重新編碼的影像傳送至 Content Understanding。辨識紀錄儲存在 App 私有資料庫，包含原文、欄位結果及辨識時的類型設定。照片和 Azure 金鑰不寫入辨識紀錄或匯出備份。首頁的「清除所有紀錄」可刪除本機歷史。相機暫存檔於載入後刪除，連線設定由 Android Keystore 提供的 AES-GCM 金鑰加密，停用系統自動備份。
 
 ## 編譯與簽署
 

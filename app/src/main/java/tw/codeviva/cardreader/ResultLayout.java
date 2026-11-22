@@ -1,11 +1,20 @@
 package tw.codeviva.cardreader;
 
 import android.content.res.Configuration;
+import android.content.ClipData;
+import android.content.ClipDescription;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.os.PersistableBundle;
+import android.graphics.Typeface;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
+import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,7 +51,7 @@ final class ResultLayout {
         boolean extracted = !rows.isEmpty();
         if (!extracted) rows = OcrRows.from(reading.type, reading.text);
 
-        if (rows.isEmpty()) addTranscript(reading.text, false);
+        if (rows.isEmpty()) addTranscript(reading, rows, false);
         if (!rows.isEmpty() || !missing.isEmpty()) {
             if (rows.isEmpty()) ui.gap(page, 12);
             LinearLayout card = ui.panel();
@@ -68,7 +77,7 @@ final class ResultLayout {
         }
         if (!rows.isEmpty()) {
             ui.gap(page, 12);
-            addTranscript(reading.text, true);
+            addTranscript(reading, rows, true);
         }
     }
 
@@ -110,36 +119,69 @@ final class ResultLayout {
         }
     }
 
-    private void addTranscript(String original, boolean collapsible) {
+    static String transcriptJson(AzureReader.Reading reading, List<Row> rows) {
+        try {
+            JSONObject values = new JSONObject();
+            for (Row row : rows) values.accumulate(row.label, row.value);
+            JSONArray lines = new JSONArray();
+            if (!reading.text.isEmpty()) {
+                for (String line : reading.text.split("\\r\\n|\\r|\\n", -1)) lines.put(line);
+            }
+            return CardCatalog.obj("文件類型", reading.type.label, "欄位", values, "原文逐行", lines).toString(2);
+        } catch (JSONException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private void copyJson(String json) {
+        ClipboardManager clipboard = (ClipboardManager) ui.c.getSystemService(Context.CLIPBOARD_SERVICE);
+        ClipData clip = ClipData.newPlainText("TextReader JSON", json);
+        PersistableBundle extras = new PersistableBundle();
+        extras.putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true);
+        clip.getDescription().setExtras(extras);
+        try {
+            clipboard.setPrimaryClip(clip);
+            if (android.os.Build.VERSION.SDK_INT < 33)
+                Toast.makeText(ui.c, "已複製 JSON", Toast.LENGTH_SHORT).show();
+        } catch (RuntimeException e) {
+            Toast.makeText(ui.c, "無法複製這筆 JSON，可從首頁匯出備份。", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void addTranscript(AzureReader.Reading reading, List<Row> rows, boolean collapsible) {
         LinearLayout panel = ui.panel();
         page.addView(panel);
-        TextView body = ui.text(original.isEmpty() ? "這張影像未讀到文字。" : original,
-            16, original.isEmpty() ? MUTED : INK, false);
-        body.setLineSpacing(ui.dp(3), 1.08f);
-        body.setTextIsSelectable(!original.isEmpty());
-        if (collapsible && !original.isEmpty()) {
-            LinearLayout header = ui.row();
-            panel.addView(header);
-            TextView label = ui.text("辨識原文", 16, INK, true);
-            label.setAccessibilityHeading(true);
-            ui.weight(header, label);
+        LinearLayout header = ui.row();
+        panel.addView(header);
+        TextView title = ui.text("辨識原文（JSON）", 16, INK, true);
+        title.setAccessibilityHeading(true);
+        ui.weight(header, title);
+        String json = transcriptJson(reading, rows);
+        LinearLayout details = ui.col();
+        if (collapsible) {
             Button toggle = ui.action("展開", false, v -> {
-                boolean expand = body.getVisibility() == View.GONE;
-                body.setVisibility(expand ? View.VISIBLE : View.GONE);
+                boolean expand = details.getVisibility() == View.GONE;
+                details.setVisibility(expand ? View.VISIBLE : View.GONE);
                 Button button = (Button) v;
                 button.setText(expand ? "收合" : "展開");
-                button.setContentDescription(expand ? "收合辨識原文" : "展開辨識原文");
+                button.setContentDescription(expand ? "收合辨識原文 JSON" : "展開辨識原文 JSON");
             });
-            toggle.setContentDescription("展開辨識原文");
+            toggle.setContentDescription("展開辨識原文 JSON");
             header.addView(toggle);
-            body.setPadding(0, ui.dp(14), 0, 0);
-            body.setVisibility(View.GONE);
-        } else {
-            TextView header = ui.text("辨識全文", 17, GREEN, true);
-            header.setAccessibilityHeading(true);
-            panel.addView(header);
-            ui.gap(panel, 10);
+            details.setVisibility(View.GONE);
         }
-        panel.addView(body);
+        panel.addView(details);
+        ui.gap(details, 10);
+        if (reading.text.isEmpty()) {
+            details.addView(ui.text("這張影像未讀到文字。", 14, MUTED, false));
+            ui.gap(details, 6);
+        }
+        TextView body = ui.text(json, 14, INK, false);
+        body.setTypeface(Typeface.MONOSPACE);
+        body.setTextIsSelectable(true);
+        body.setTag("transcript-json");
+        details.addView(body);
+        ui.gap(details, 10);
+        details.addView(ui.action("複製 JSON", false, () -> copyJson(json)));
     }
 }

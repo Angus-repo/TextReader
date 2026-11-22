@@ -16,13 +16,14 @@ import java.util.concurrent.*;
 import static tw.codeviva.cardreader.ReaderScreen.*;
 
 public class MainActivity extends Activity {
-    private static final int CAMERA=31,GALLERY=32;
+    private static final int CAMERA=31,GALLERY=32,EXPORT=33,IMPORT=34;
     private ReaderScreen ui;
     private LinearLayout content;
     private ScrollView scroll;
     private Config config;
     private CardCatalog catalog;
-    private final List<AzureReader.Reading> results = new ArrayList<>();
+    private ReadingHistory history;
+    private int historyLimit = 30;
     private boolean confirmType;
     private int fieldMode; // 0: use type settings, 1: include fields, 2: text only
     private RuleEditor ruleEditor;
@@ -40,6 +41,7 @@ public class MainActivity extends Activity {
         if(Build.VERSION.SDK_INT>=33)getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
             android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,this::onBackPressed);
         ui=new ReaderScreen(this);
+        history = new ReadingHistory(this);
         try {catalog=new CardCatalog(this);}catch(Exception e){throw new IllegalStateException(e);}
         try {config=Config.load(this);}catch(Exception e){config=new Config();error="無法解密連線設定，請重新設定 Azure 連線。";}
         if(saved!=null && saved.getString("capture")!=null) capture=Uri.parse(saved.getString("capture"));
@@ -82,32 +84,105 @@ public class MainActivity extends Activity {
         ui.gap(hero,14);LinearLayout actions=ui.row();hero.addView(actions);
         ui.weight(actions,ui.action("拍照",false,()->source(true)));ui.gap(actions,8);
         ui.weight(actions,ui.action("從相簿選取",false,()->source(false)));
+        List<ReadingHistory.Entry> entries;
+        try {
+            entries = history.list();
+        } catch (android.database.SQLException e) {
+            entries = Collections.emptyList();
+            error = "無法讀取手機上的辨識紀錄。";
+        }
         showError(content);
         if(!config.ready()){ui.gap(content,12);Button setup=ui.action("設定 Azure 連線以開始辨識",false,this::settings);content.addView(setup);}
-        ui.gap(content,24);LinearLayout label=ui.row();content.addView(label);ui.weight(label,ui.text("本次讀取",21,INK,true));
-        label.addView(ui.text(results.size() + " 筆", 14, GREEN, true));
+        ui.gap(content,24);LinearLayout label=ui.row();content.addView(label);ui.weight(label,ui.text("辨識紀錄",21,INK,true));
+        label.addView(ui.text(entries.size() + " 筆", 14, GREEN, true));
         ui.gap(content, 12);
         LinearLayout list = ui.panel();
         content.addView(list);
-        if (results.isEmpty()) {
-            note(list, "可讀取證件、收據、表單、名片及其他含文字的影像。");
+        if (entries.isEmpty()) {
+            note(list, "完成辨識後，結果會自動儲存在這支手機。");
         } else {
-            for (int i = results.size() - 1; i >= 0; i--) {
-                final int index = i;
-                AzureReader.Reading reading = results.get(i);
-                if (i < results.size() - 1) ui.line(list);
-                ui.tile(list, reading.type.label, "第 " + (i + 1) + " 筆", true, null, () -> detail(index));
+            java.text.DateFormat date = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT);
+            for (int i = 0; i < Math.min(historyLimit, entries.size()); i++) {
+                ReadingHistory.Entry entry = entries.get(i);
+                if (i > 0) ui.line(list);
+                ui.tile(list, entry.label, date.format(new Date(entry.time)), true, null, () -> openReading(entry.id));
             }
+            if (entries.size() > historyLimit)
+                list.addView(ui.action("顯示更多紀錄", false, () -> { historyLimit += 30; home(); }));
         }
         ui.gap(content, 14);
-        note(content, "本次結果會在結束 App 後清除。");
-        if(!results.isEmpty()){
-            ui.gap(content,12);content.addView(ui.action("清除本次資料",false,()->confirmClear()));
+        LinearLayout files = ui.row();
+        content.addView(files);
+        if (!entries.isEmpty()) {
+            ui.weight(files, ui.action("匯出備份", false, () -> chooseBackup(true)));
+            ui.gap(files, 8);
+        }
+        ui.weight(files, ui.action("匯入備份", false, () -> chooseBackup(false)));
+        ui.gap(content, 8);
+        note(content, "覆蓋更新會保留紀錄。解除安裝前可匯出備份，JSON 檔含明文辨識資料。");
+        if (!entries.isEmpty()) {
+            ui.gap(content,12);content.addView(ui.action("清除所有紀錄",false,this::confirmClear));
         }
     }
     private void confirmClear(){
-        new AlertDialog.Builder(this).setTitle("清除本次讀取？").setMessage("本次所有影像的辨識結果都會清除。")
-            .setNegativeButton("取消",null).setPositiveButton("清除",(d,w)->{results.clear();error="";home();}).show();
+        new AlertDialog.Builder(this).setTitle("清除所有辨識紀錄？").setMessage("將從這支手機刪除所有已儲存的辨識結果。")
+            .setNegativeButton("取消",null).setPositiveButton("清除",(d,w)->{
+                try {
+                    history.clear();
+                    historyLimit = 30;
+                    error = "";
+                } catch (android.database.SQLException e) {
+                    error = "無法清除辨識紀錄。";
+                }
+                home();
+            }).show();
+    }
+
+    private void chooseBackup(boolean export) {
+        Intent intent = new Intent(export ? Intent.ACTION_CREATE_DOCUMENT : Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE).setType("application/json");
+        if (export) intent.putExtra(Intent.EXTRA_TITLE, "TextReader-history.json");
+        try {
+            startActivityForResult(intent, export ? EXPORT : IMPORT);
+        } catch (ActivityNotFoundException e) {
+            error = "無法開啟系統檔案選擇器。";
+            home();
+        }
+    }
+
+    private void transferBackup(boolean export, Uri uri) {
+        String action = export ? "匯出" : "匯入";
+        shell("transfer", action + "備份", null);
+        note(content, "正在" + action + "辨識紀錄…");
+        running = worker.submit(() -> {
+            try {
+                int count;
+                if (export) {
+                    try (OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
+                        if (out == null) throw new IOException();
+                        count = history.exportTo(out);
+                    }
+                } else {
+                    try (InputStream in = getContentResolver().openInputStream(uri)) {
+                        if (in == null) throw new IOException();
+                        count = history.importFrom(in);
+                    }
+                }
+                runOnUiThread(() -> {
+                    if (isDestroyed() || isFinishing()) return;
+                    error = "";
+                    home();
+                    String msg = export ? "已匯出 " + count + " 筆紀錄" : "已新增 " + count + " 筆紀錄，重複的紀錄已略過。";
+                    Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    if (isDestroyed() || isFinishing()) return;
+                    error = export ? "匯出失敗，請確認目的地可寫入並重新匯出。" : "匯入失敗，請選取完整的 TextReader JSON 備份。";
+                    home();
+                });
+            }
+        });
     }
     private void source(boolean camera){
         error="";
@@ -132,7 +207,13 @@ public class MainActivity extends Activity {
         CaptureProvider.file(this,u).delete();if(u.equals(capture))capture=null;
     }
     @Override protected void onActivityResult(int request,int result,Intent data){
-        super.onActivityResult(request,result,data);if(request!=CAMERA&&request!=GALLERY)return;
+        super.onActivityResult(request,result,data);
+        if (request == EXPORT || request == IMPORT) {
+            if (result == RESULT_OK && data != null && data.getData() != null)
+                transferBackup(request == EXPORT, data.getData());
+            return;
+        }
+        if(request!=CAMERA&&request!=GALLERY)return;
         final Uri temp=request==CAMERA?capture:null;
         Uri uri=request==CAMERA?temp:data==null?null:data.getData();
         if(result!=RESULT_OK||uri==null){clearCapture(temp);return;}
@@ -258,23 +339,38 @@ public class MainActivity extends Activity {
         byte[] bytes = photo.jpeg;
         boolean fields = fieldMode == 1 || (fieldMode == 0 && type.autoFields);
         int token = sequence + 1;
-        run("正在讀取" + type.label + "的文字…", () -> api.read(type, bytes, fields,
-            message -> runOnUiThread(() -> {
+        run("正在讀取" + type.label + "的文字…", () -> {
+            AzureReader.Reading reading = api.read(type, bytes, fields, message -> runOnUiThread(() -> {
                 if (sequence == token && busy && !isDestroyed()) {
                     status = message;
                     preview();
                 }
-            })), reading -> {
-                results.add(reading);
-                photo = null;
-                selected = null;
-                classified = null;
-                detail(results.size() - 1);
-            });
+            }));
+            if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
+            try {
+                history.add(reading);
+            } catch (android.database.SQLException e) {
+                throw new IOException("無法儲存辨識紀錄，請確認手機可用空間。", e);
+            }
+            return reading;
+        }, reading -> {
+            photo = null;
+            selected = null;
+            classified = null;
+            detail(reading);
+        });
     }
 
-    private void detail(int index) {
-        AzureReader.Reading reading = results.get(index);
+    private void openReading(String id) {
+        try {
+            detail(history.get(id));
+        } catch (JSONException | android.database.SQLException e) {
+            error = "無法開啟這筆辨識紀錄。";
+            home();
+        }
+    }
+
+    private void detail(AzureReader.Reading reading) {
         shell("detail", "讀取結果", this::home);
         new ResultLayout(ui, content).show(reading);
         ui.gap(content, 16);
@@ -358,13 +454,16 @@ public class MainActivity extends Activity {
             case "settings":leaveSettings();return;
             case "detail":home();return;
             case "preview":abandon();return;
-            default:if(results.isEmpty()){finish();return;}
-                new AlertDialog.Builder(this).setTitle("結束本次讀取？").setMessage("離開後會清除本次辨識結果。")
-                    .setNegativeButton("取消",null).setPositiveButton("離開",(d,w)->{results.clear();finish();}).show();
+            case "transfer":return;
+            default:finish();return;
         }
     }
     @Override protected void onDestroy(){
-        sequence++;worker.shutdownNow();if(isFinishing())clearCapture(capture);
+        sequence++;
+        if (running != null) running.cancel(true);
+        worker.execute(history::close);
+        worker.shutdown();
+        if(isFinishing())clearCapture(capture);
         super.onDestroy();
     }
 }

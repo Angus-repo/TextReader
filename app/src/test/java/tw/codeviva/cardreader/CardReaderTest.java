@@ -104,21 +104,28 @@ public class CardReaderTest {
     @Test public void resultsShowValuesLeadingZerosMissingFieldsAndConfidence() throws Exception {
         try(ActivityController<MainActivity> ctl=Robolectric.buildActivity(MainActivity.class).setup()){
             MainActivity a=ctl.get();
-            java.lang.reflect.Field field=MainActivity.class.getDeclaredField("results");field.setAccessible(true);
-            @SuppressWarnings("unchecked") List<AzureReader.Reading> data=(List<AzureReader.Reading>)field.get(a);
-            data.add(new AzureReader.Reading(catalog.cards.get("nhi_front"),"測試輸出",
-                obj("NhiCardNumber",obj("valueString","000000012345","confidence",0.94))));
-            java.lang.reflect.Method m=MainActivity.class.getDeclaredMethod("detail",int.class);
-            m.setAccessible(true);m.invoke(a,0);
+            String id;
+            try (ReadingHistory store = new ReadingHistory(a)) {
+                id = store.add(new AzureReader.Reading(catalog.cards.get("nhi_front"),"測試輸出",
+                    obj("NhiCardNumber", obj("valueString","000000012345","confidence",0.94))));
+            }
+            java.lang.reflect.Method m=MainActivity.class.getDeclaredMethod("openReading",String.class);
+            m.setAccessible(true);m.invoke(a,id);
             View root=a.findViewById(android.R.id.content);assertNotNull(find(root,"000000012345"));assertNotNull(find(root,"信心 94%"));assertNotNull(find(root,"未讀取"));
             assertNotNull(find(root,"已讀取 1 / 5"));
-            assertEquals(View.GONE, find(root,"測試輸出").getVisibility());
+            assertEquals(View.GONE, ((View)root.findViewWithTag("transcript-json").getParent()).getVisibility());
             find(root,"展開").performClick();
-            assertEquals(View.VISIBLE, find(root,"測試輸出").getVisibility());
+            TextView body = root.findViewWithTag("transcript-json");
+            JSONObject json = new JSONObject(body.getText().toString());
+            assertEquals("000000012345", json.getJSONObject("欄位").getString("健保卡卡號"));
+            assertEquals("測試輸出", json.getJSONArray("原文逐行").getString(0));
+            find(root,"複製 JSON").performClick();
+            android.content.ClipboardManager clipboard = a.getSystemService(android.content.ClipboardManager.class);
+            assertEquals(body.getText().toString(), clipboard.getPrimaryClip().getItemAt(0).getText().toString());
             a.onBackPressed();assertNotNull(find(root,"1 筆"));
         }
     }
-    @Test public void plainIdOcrAlignsPrintedFieldsAndKeepsExactOriginal() {
+    @Test public void plainIdOcrAlignsPrintedFieldsAndKeepsExactOriginal() throws Exception {
         String raw = "中華民國國民身分證\n樣\n本\n4\n姓名\n林\n以\n安\n出生\n年月日\n民國 80 年 2 月 3 日"
             + "\n發證日期\n民國 110 年 5 月 6 日(北市)補發\n性別 女\n統一編號\nA000000001";
         try (ActivityController<MainActivity> ctl = Robolectric.buildActivity(MainActivity.class).setup()) {
@@ -133,24 +140,28 @@ public class CardReaderTest {
             assertNotNull(find(root, "女"));
             assertNotNull(find(root, "A000000001"));
             assertNull(find(root, "4"));
-            TextView transcript = (TextView) find(root, raw);
-            assertEquals(View.GONE, transcript.getVisibility());
+            TextView transcript = root.findViewWithTag("transcript-json");
+            View container = (View) transcript.getParent();
+            JSONArray lines = new JSONObject(transcript.getText().toString()).getJSONArray("原文逐行");
+            assertEquals(Arrays.asList(raw.split("\\n")), jsonStrings(lines));
+            assertEquals(View.GONE, container.getVisibility());
             find(root, "展開").performClick();
-            assertEquals(View.VISIBLE, transcript.getVisibility());
+            assertEquals(View.VISIBLE, container.getVisibility());
             assertTrue(transcript.isTextSelectable());
             find(root, "收合").performClick();
-            assertEquals(View.GONE, transcript.getVisibility());
+            assertEquals(View.GONE, container.getVisibility());
         }
     }
 
-    @Test public void textLayoutPreservesUnlabeledProseAndMultilineAddresses() {
+    @Test public void textLayoutPreservesUnlabeledProseAndMultilineAddresses() throws Exception {
         try (ActivityController<MainActivity> ctl = Robolectric.buildActivity(MainActivity.class).setup()) {
             ReaderScreen ui = new ReaderScreen(ctl.get());
             LinearLayout root = ui.col();
             String prose = "第一段內文。\n\n第二段提及文件編號的用途。";
             new ResultLayout(ui, root).show(new AzureReader.Reading(catalog.cards.get("document"), prose, null));
             assertNull(find(root, "展開"));
-            assertEquals(View.VISIBLE, find(root, prose).getVisibility());
+            TextView json = root.findViewWithTag("transcript-json");
+            assertEquals(Arrays.asList(prose.split("\\n")), jsonStrings(new JSONObject(json.getText().toString()).getJSONArray("原文逐行")));
             List<ResultLayout.Row> address = OcrRows.from(catalog.cards.get("id_back"), "住址\n測試市一區\n測試路1號\n00123456");
             assertEquals(1, address.size());
             assertEquals("測試市一區測試路1號", address.get(0).value);
@@ -235,7 +246,9 @@ public class CardReaderTest {
                     assertEquals(Collections.singletonList("classify"), calls);
                     find(root, "讀取文字").performClick();
                 }
-                awaitText(root, "合計 365");
+                awaitText(root, "辨識原文（JSON）");
+                TextView json = root.findViewWithTag("transcript-json");
+                assertEquals("合計 365", new JSONObject(json.getText().toString()).getJSONArray("原文逐行").getString(0));
                 assertEquals(Arrays.asList("classify","read"), calls);
                 assertNotNull(find(root, "收據／發票"));
             }
@@ -278,7 +291,9 @@ public class CardReaderTest {
             assertEquals(Collections.singletonList("classify"), calls);
             assertNotNull(find(root, "已手動選擇類型，可直接讀取這張影像。"));
             find(root, "讀取文字").performClick();
-            awaitText(root, "測試背面文字");
+            awaitText(root, "辨識原文（JSON）");
+            TextView json = root.findViewWithTag("transcript-json");
+            assertEquals("測試背面文字", new JSONObject(json.getText().toString()).getJSONArray("原文逐行").getString(0));
             assertNotNull(find(root, "身分證反面"));
             assertEquals(Arrays.asList("classify", "ocr"), calls);
         }
@@ -514,6 +529,110 @@ public class CardReaderTest {
             CardCatalog after = new CardCatalog(RuntimeEnvironment.getApplication());
             assertEquals(source.criteria, after.cards.get("receipt").criteria);
             assertEquals(12, after.cards.size());
+        }
+    }
+
+    private static List<String> jsonStrings(JSONArray values) throws JSONException {
+        List<String> result = new ArrayList<>();
+        for (int i = 0; i < values.length(); i++) result.add(values.getString(i));
+        return result;
+    }
+
+    @Test public void historySurvivesReopenAndBackupRestoreWithoutOriginalRules() throws Exception {
+        android.content.Context context = RuntimeEnvironment.getApplication();
+        String raw = "00123\n\n測試\"引號\"\n";
+        JSONArray defs = new JSONArray().put(obj("key", "Code", "label", "原編號", "description", "完整印字"));
+        catalog.save("my_test", "舊類型", "測試分類", defs, true);
+        String id;
+        java.io.ByteArrayOutputStream backup = new java.io.ByteArrayOutputStream();
+        try (ReadingHistory store = new ReadingHistory(context)) {
+            id = store.add(new AzureReader.Reading(catalog.cards.get("my_test"), raw, obj("Code",obj("valueString","00123","confidence",0.9))));
+            assertEquals(1, store.exportTo(backup));
+        }
+        catalog.reset("my_test");
+        assertFalse(catalog.cards.containsKey("my_test"));
+        try (ReadingHistory again = new ReadingHistory(context)) {
+            assertEquals(id, again.list().get(0).id);
+            AzureReader.Reading saved = again.get(id);
+            assertEquals("舊類型", saved.type.label);
+            assertEquals("原編號", saved.type.fields.getJSONObject(0).getString("label"));
+            assertEquals(raw, saved.text);
+            assertEquals("00123", saved.fields.getJSONObject("Code").getString("valueString"));
+        }
+        assertTrue(context.deleteDatabase("reading-history.db"));
+        try (ReadingHistory cleanInstall = new ReadingHistory(context)) {
+            assertEquals(0, cleanInstall.list().size());
+            assertEquals(1, cleanInstall.importFrom(new java.io.ByteArrayInputStream(backup.toByteArray())));
+            assertEquals(0, cleanInstall.importFrom(new java.io.ByteArrayInputStream(backup.toByteArray())));
+            assertEquals(raw, cleanInstall.get(id).text);
+            assertEquals(1, cleanInstall.list().size());
+            cleanInstall.clear();
+            assertTrue(cleanInstall.list().isEmpty());
+        }
+    }
+
+    @Test public void homeBackupPickerRestoresHistoryAfterDataRemoval() throws Exception {
+        android.content.Context context = RuntimeEnvironment.getApplication();
+        try (ReadingHistory store = new ReadingHistory(context)) {
+            store.add(new AzureReader.Reading(catalog.cards.get("id_back"), "背面測試", null));
+        }
+        java.io.File file = java.io.File.createTempFile("textreader-test", ".json");
+        Intent picked = new Intent().setData(Uri.fromFile(file));
+        try {
+            try (ActivityController<MainActivity> ctl = Robolectric.buildActivity(MainActivity.class).setup()) {
+                MainActivity a = ctl.get();
+                View root = a.findViewById(android.R.id.content);
+                find(root, "匯出備份").performClick();
+                org.robolectric.shadows.ShadowActivity.IntentForResult request = Shadows.shadowOf(a).getNextStartedActivityForResult();
+                assertEquals(Intent.ACTION_CREATE_DOCUMENT, request.intent.getAction());
+                a.onActivityResult(request.requestCode, Activity.RESULT_OK, picked);
+                awaitText(root, "辨識紀錄");
+                assertTrue(file.length() > 0);
+                find(root, "清除所有紀錄").performClick();
+                android.app.AlertDialog dialog = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+                dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick();
+                awaitText(root, "0 筆");
+            }
+            try (ActivityController<MainActivity> ctl = Robolectric.buildActivity(MainActivity.class).setup()) {
+                MainActivity a = ctl.get();
+                View root = a.findViewById(android.R.id.content);
+                assertNotNull(find(root, "0 筆"));
+                find(root, "匯入備份").performClick();
+                org.robolectric.shadows.ShadowActivity.IntentForResult request = Shadows.shadowOf(a).getNextStartedActivityForResult();
+                assertEquals(Intent.ACTION_OPEN_DOCUMENT, request.intent.getAction());
+                a.onActivityResult(request.requestCode, Activity.RESULT_OK, picked);
+                awaitText(root, "1 筆");
+                View title = find(root, "身分證反面");
+                ((View) ((View) title.getParent()).getParent()).performClick();
+                assertNotNull(find(root, "辨識原文（JSON）"));
+                TextView body = root.findViewWithTag("transcript-json");
+                assertEquals("背面測試", new JSONObject(body.getText().toString()).getJSONArray("原文逐行").getString(0));
+            }
+        } finally {
+            file.delete();
+        }
+    }
+
+    @Test public void damagedBackupRollsBackAllNewRecords() throws Exception {
+        try (ReadingHistory store = new ReadingHistory(RuntimeEnvironment.getApplication())) {
+            String keep = store.add(new AzureReader.Reading(catalog.cards.get("other"), "原有資料", null));
+            String incoming = store.add(new AzureReader.Reading(catalog.cards.get("id_back"), "新資料", null));
+            java.io.ByteArrayOutputStream backup = new java.io.ByteArrayOutputStream();
+            store.exportTo(backup);
+            JSONObject broken = new JSONObject(backup.toString("UTF-8"));
+            JSONObject incomingRecord = null;
+            JSONArray all = broken.getJSONArray("records");
+            for (int i=0;i<all.length();i++)
+                if (incoming.equals(all.getJSONObject(i).getString("id"))) incomingRecord = all.getJSONObject(i);
+            assertNotNull(incomingRecord);
+            broken.put("records", new JSONArray().put(incomingRecord.put("id", java.util.UUID.randomUUID().toString())).put(obj("bad",true)));
+            try {
+                store.importFrom(new java.io.ByteArrayInputStream(broken.toString().getBytes("UTF-8")));
+                fail();
+            } catch (JSONException expected) {
+                assertEquals(2, store.list().size());
+                assertEquals("原有資料", store.get(keep).text);
+            }
         }
     }
 

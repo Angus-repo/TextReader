@@ -20,7 +20,7 @@ final class CardCatalog {
         final JSONArray fields;
         final boolean autoFields;
 
-        private Card(JSONObject json) throws JSONException {
+        Card(JSONObject json) throws JSONException {
             code = json.getString("code");
             label = json.getString("label");
             criteria = json.getString("criteria");
