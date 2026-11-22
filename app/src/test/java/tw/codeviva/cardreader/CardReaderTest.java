@@ -599,6 +599,89 @@ public class CardReaderTest {
         } finally { rotated.recycle(); b.recycle(); }
     }
 
+    @Test public void licenseTranscriptRecoversFieldsFromSplitAndMisreadHeadingsInHistory() throws Exception {
+        CardCatalog.Card type = catalog.cards.get("dl_front");
+        String text = String.join("\n", "中", "年間", "國", "交通部製發汽車駕駛執照",
+                "駕照", "號碼", "Q123400067", "性別", "女", "姓", "名", "林甲乙", "樣張",
+                "出生", "日期", "061.02.03", "等無", "住量", "普通小型車", "訂井", "B",
+                "住", "址", "測試市測試路1號", "IV", "有效", "日期", "139.02.03",
+                "管格", "編號", "0010907031002", "日期", "101.07.17", "客軟", "日有");
+        AzureReader.Reading reading = new AzureReader.Reading(type,text,null);
+        // Old scans can contain an empty crop and a false negative ink test.
+        reading.local.put("LicenseCells",obj("LicenseClass","","ConditionCode","","IssueDate",""));
+        reading.local.put("LicenseBlankCells",obj("ExpiryDate",true,"ControlNumber",true));
+        try (ReadingHistory db = new ReadingHistory(RuntimeEnvironment.getApplication())) {
+            JSONObject fields = licenseJson(type,db.get(db.add(reading)));
+            assertEquals("普通小型車",fields.getString("駕照種類"));
+            assertEquals("B",fields.getString("持照條件代碼"));
+            assertEquals("061.02.03",fields.getString("出生日期"));
+            assertEquals("139.02.03",fields.getString("有效日期"));
+            assertEquals("0010907031002",fields.getString("管轄／管制編號"));
+            assertEquals("101.07.17",fields.getString("發照日期"));
+            assertEquals("",fields.getString("審驗日期"));
+            assertEquals("交通部",fields.getString("發照機關"));
+        }
+    }
+
+    @Test public void licenseBackReadsNumberAndReorderedLegendsWithoutFillingEmptyRecords() throws Exception {
+        CardCatalog.Card type = catalog.cards.get("dl_back");
+        String text = String.join("\n", "印製", "號碼", "（甲）", "00357291", "動員", "編號",
+                "B寓秋自動排檔車", "A典尿制", "C加註條件:", "樣", "張", "登", "記", "機", "關",
+                "期罰款·逾別", "一年本照经销", "位", "址", "史", "更");
+        JSONObject fields = licenseJson(type,new AzureReader.Reading(type,text,null));
+        assertEquals("00357291",fields.getString("印製號碼").replaceAll("[^0-9]",""));
+        assertTrue(fields.getString("印製號碼").contains("甲"));
+        assertEquals("無限制",fields.getString("持照條件 A"));
+        assertEquals("駕駛自動排檔車",fields.getString("持照條件 B"));
+        for (Iterator<String> it=fields.keys();it.hasNext();) {
+            String label=it.next();
+            if (!label.equals("印製號碼") && !label.startsWith("持照條件")) assertEquals(label,"",fields.getString(label));
+        }
+    }
+
+    @Test public void licenseTranscriptLeavesAmbiguousDatesNumbersAndPersonalConditionsAlone() throws Exception {
+        CardCatalog.Card front = catalog.cards.get("dl_front");
+        String text = "職業大客車\n住址\n測試市一區\n有效\n日期\n130.01.15\n管制編號\n001234567890\n審驗日期\n106.01.02";
+        JSONObject fields = licenseJson(front,new AzureReader.Reading(front,text,null));
+        assertEquals("職業大客車",fields.getString("駕照種類"));
+        assertEquals("",fields.getString("持照條件代碼"));
+        assertEquals("",fields.getString("發照日期"));
+        assertEquals("106.01.02",fields.getString("審驗日期"));
+        CardCatalog.Card back = catalog.cards.get("dl_back");
+        fields = licenseJson(back,new AzureReader.Reading(back,"印製\n號碼\n動員\n編號\n0000198\nB限駕特製車\nC加註條件：須戴眼鏡",null));
+        assertEquals("",fields.getString("印製號碼"));
+        assertEquals("0000198",fields.getString("動員編號"));
+        assertEquals("限駕特製車",fields.getString("持照條件 B"));
+        assertEquals("",fields.getString("持照條件 A"));
+        assertEquals("須戴眼鏡",fields.getString("C 加註條件"));
+    }
+
+
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    public void frontGridUsesOuterEdgesWhenReflectionsInterruptLongRules() {
+        android.graphics.Bitmap image = android.graphics.Bitmap.createBitmap(650,450,android.graphics.Bitmap.Config.ARGB_8888);
+        image.eraseColor(android.graphics.Color.WHITE);
+        android.graphics.Canvas canvas = new android.graphics.Canvas(image);
+        android.graphics.Paint pen = new android.graphics.Paint();
+        pen.setColor(android.graphics.Color.BLACK);
+        pen.setStrokeWidth(2);
+        int top = 40, height = 375, left = 32, right = 575;
+        double[] rows = {0,.267,.356,.535,.625,.832,.919,1};
+        int[] starts = {left,195,left,185,185,110,left,left};
+        int[] ends = {365,395,291,550,right,right,455,540};
+        for (int i=0; i<rows.length; i++) {
+            float y = top + (float)rows[i]*height;
+            canvas.drawLine(starts[i],y,ends[i],y,pen);
+        }
+        for (int edge : new int[]{left,69,right}) canvas.drawLine(edge,top,edge,top+height,pen);
+        LicenseGrid grid = LicenseGrid.find(image,true);
+        assertNotNull(grid);
+        android.graphics.Rect bounds = grid.region(image,0,0,1,1);
+        assertEquals(left,bounds.left,5);
+        assertEquals(right,bounds.right,5);
+        image.recycle();
+    }
+
     @Test public void upgradesUntouchedDriverFieldTemplatesAndPreservesEditedDefinitions() throws Exception {
         JSONArray saved = new JSONArray();
         saved.put(obj("key", "PrintNumber", "label", "印製號碼", "description", "印製號碼，包含括號及前綴。"));

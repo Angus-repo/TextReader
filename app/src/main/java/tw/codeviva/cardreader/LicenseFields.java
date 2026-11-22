@@ -58,6 +58,7 @@ final class LicenseFields {
         String compact = s.replaceAll("[\\s\\p{Z}]+", "");
         switch (key) {
             case "Authority":
+                if (compact.matches(".*交通部(?:製發|制發|核發)(?:汽車|機車)?駕駛執照.*")) return "交通部";
                 java.util.regex.Matcher m = AUTHORITY.matcher(compact.replace("中華民國",""));
                 if (m.find()) return m.group(1);
                 return compact.matches("[\\p{IsHan}]{2,20}(部|局|所|站|中心|政府)") ? compact : "";
@@ -85,12 +86,12 @@ final class LicenseFields {
             this.left = left; this.right = right; this.x = (left+right)/2; this.y = y; this.value = value;
         }
     }
-    private static List<Word> words(JSONObject page, int turn, LicenseGrid grid) {
+    private static List<Word> words(JSONObject page, int turn, LicenseGrid grid, String level) {
         List<Word> result = new ArrayList<>();
-        JSONArray items = page == null ? null : page.optJSONArray("words");
-        if (page != null && (items == null || items.length() == 0)) items = page.optJSONArray("lines");
+        JSONArray items = page == null ? null : page.optJSONArray(level);
         if (items == null) return result;
         double width = page.optDouble("width"), height = page.optDouble("height");
+        if (!(width > 0 && height > 0)) return result;
         for (int i=0; i<items.length(); i++) {
             JSONObject word = items.optJSONObject(i);
             if (word == null || word.isNull("content")) continue;
@@ -115,7 +116,8 @@ final class LicenseFields {
     }
 
     static JSONObject fromPage(JSONObject page, int turn, LicenseGrid grid, Cell[] cells) throws JSONException {
-        List<Word> words = words(page, turn, grid);
+        List<Word> words = words(page, turn, grid, "words");
+        if (words.isEmpty()) words = words(page, turn, grid, "lines");
         JSONObject values = new JSONObject();
         for (Cell cell : cells) {
             StringBuilder value = new StringBuilder();
@@ -160,7 +162,6 @@ final class LicenseFields {
                 Rect rect = grid.region(upright,cell.l,cell.t,cell.r,cell.b);
                 if (!hasInk(upright,rect)) {
                     if (!rect.isEmpty() && values.optString(cell.key).isEmpty()) emptyCells.put(cell.key,true);
-                    values.put(cell.key,"");
                     continue;
                 }
                 if (!modelAvailable || !values.optString(cell.key).isEmpty() ||

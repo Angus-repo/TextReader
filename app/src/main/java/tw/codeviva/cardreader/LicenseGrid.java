@@ -63,7 +63,7 @@ final class LicenseGrid {
     // lines span the header too, so use their midpoint to refine the two sides.
     private double verticalEdge(int[] gray, double estimate) {
         double bestX = estimate, bestSupport = .48;
-        int radius = (int)Math.ceil((right-left)*.10);
+        int radius = (int)Math.ceil((right-left)*.045);
         for (int x = Math.max(2,(int)estimate-radius); x <= Math.min(w-3,(int)estimate+radius); x++) {
             for (int k = -4; k <= 4; k++) {
                 int hits = 0, n = 0;
@@ -140,12 +140,15 @@ final class LicenseGrid {
             if (matches.size() < layout.length - 1 || widest < height * 1.12 || widest > height * 2.12) continue;
             if (best != null && quality <= best.score) continue;
             List<Integer> left = new ArrayList<>(), right = new ArrayList<>();
-            for (Rule line : matches) if (line.right - line.left > .87 * widest) {
+            // Glare can split a rule partway across a cell. Each outer edge only needs
+            // support on two different rows; the same row need not contain both edges.
+            for (Rule line : matches) {
                 left.add(line.left); right.add(line.right);
             }
-            if (left.size() < 2) continue;
             Collections.sort(left); Collections.sort(right);
-            best = new LicenseGrid(w, h, left.get(left.size()/2), right.get(right.size()/2), first.y, last.y, slope, quality);
+            int l = left.get(1), r = right.get(right.size()-2);
+            if (r-l < height*1.12 || r-l > height*2.12) continue;
+            best = new LicenseGrid(w, h, l, r, first.y, last.y, slope, quality);
         }
         return best;
     }

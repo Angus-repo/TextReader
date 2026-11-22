@@ -45,6 +45,7 @@ final class ResultLayout {
         JSONObject cells = reading.local.optJSONObject("LicenseCells");
         JSONObject blankCells = reading.local.optJSONObject("LicenseBlankCells");
         java.util.Map<String,String> licenseLabels = license ? LicenseFields.labeled(reading.type, displayText) : null;
+        java.util.Map<String,String> transcript = license ? LicenseTranscript.read(reading.type.code,displayText) : null;
         boolean front = reading.type.code.equals("id_front"), back = reading.type.code.equals("id_back");
         String sexLabel = front ? reading.type.fieldLabel("Sex") : null;
         String idLabel = front ? reading.type.fieldLabel("IdNumber") : null;
@@ -64,13 +65,15 @@ final class ResultLayout {
                 definedFields--;
                 continue;
             }
-            if (license && blankCells != null && blankCells.optBoolean(key)) {
+            String anchored = license ? transcript.getOrDefault(key,"") : "";
+            boolean blankCrop = license && blankCells != null && blankCells.optBoolean(key);
+            if (blankCrop && anchored.isEmpty()) {
                 rows.add(new Row(label, "", Double.NaN));
                 continue;
             }
             JSONObject field = reading.fields == null ? null : reading.fields.optJSONObject(key);
             String value = IdCardDetails.cloudValue(reading, key);
-            if (license) value = LicenseFields.clean(key,value);
+            if (license) value = blankCrop ? "" : LicenseFields.clean(key,value);
             if (front && "Sex".equals(key)) value = IdCardDetails.sexValue(value);
             if (front && "IdNumber".equals(key)) value = IdCardDetails.idNumber(value);
             if (back && "MilitaryService".equals(key)) value = IdCardDetails.serviceValue(value);
@@ -81,11 +84,12 @@ final class ResultLayout {
                 continue;
             }
             if (license) {
-                String fromImage = LicenseFields.positioned(cells,key);
-                if (!fromImage.isEmpty()) usedImage = true;
-                // When the actual table was read, an empty physical cell must stay empty.
-                String resolved = fromImage;
-                if (resolved.isEmpty() && (cells == null || !cells.has(key) || key.equals("Authority")))
+                String resolved = anchored;
+                if (resolved.isEmpty()) {
+                    resolved = LicenseFields.positioned(cells,key);
+                    usedImage |= !resolved.isEmpty();
+                }
+                if (resolved.isEmpty())
                     resolved = LicenseFields.fromLabels(licenseLabels,key,label,displayText);
                 rows.add(new Row(label,resolved,Double.NaN));
                 continue;
