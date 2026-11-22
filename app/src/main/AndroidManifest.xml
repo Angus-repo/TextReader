@@ -1,7 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
     <application android:label="TextReader" android:icon="@drawable/ic_reader" android:allowBackup="false" android:hasFragileUserData="true"
         android:usesCleartextTraffic="false" android:theme="@style/AppTheme">
+        <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="ocr_chinese"/>
+        <activity android:name=".LiveScanActivity" android:exported="false"/>
         <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>

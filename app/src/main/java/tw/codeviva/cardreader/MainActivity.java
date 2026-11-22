@@ -5,7 +5,6 @@ import android.content.*;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.*;
-import android.provider.MediaStore;
 import android.text.InputType;
 import android.view.*;
 import android.widget.*;
@@ -82,7 +81,7 @@ public class MainActivity extends Activity {
         words.addView(ui.text("讀取影像文字",27,WHITE,true));ui.gap(words,6);words.addView(ui.text("先辨識類型，再讀取全文",14,0xffd6eae1,false));
         top.addView(new ReaderScreen.PageArt(this),ui.dp(98),ui.dp(74));
         ui.gap(hero,14);LinearLayout actions=ui.row();hero.addView(actions);
-        ui.weight(actions,ui.action("拍照",false,()->source(true)));ui.gap(actions,8);
+        ui.weight(actions,ui.action("即時辨識",false,()->source(true)));ui.gap(actions,8);
         ui.weight(actions,ui.action("從相簿選取",false,()->source(false)));
         List<ReadingHistory.Entry> entries;
         try {
@@ -191,9 +190,7 @@ public class MainActivity extends Activity {
                 File dir=CaptureProvider.dir(this);if(!dir.isDirectory()&&!dir.mkdirs())throw new IOException();
                 String name=UUID.randomUUID()+".jpg";capture=new Uri.Builder().scheme("content").authority(CaptureProvider.AUTHORITY).appendPath(name).build();
                 if(!CaptureProvider.file(this,capture).createNewFile())throw new IOException();
-                Intent i=new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-                i.putExtra(MediaStore.EXTRA_OUTPUT,capture);
-                i.setClipData(ClipData.newRawUri("掃描照片",capture));i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                Intent i = new Intent(this, LiveScanActivity.class).setData(capture);
                 startActivityForResult(i,CAMERA);
             }else{
                 Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE);
@@ -216,11 +213,25 @@ public class MainActivity extends Activity {
         if(request!=CAMERA&&request!=GALLERY)return;
         final Uri temp=request==CAMERA?capture:null;
         Uri uri=request==CAMERA?temp:data==null?null:data.getData();
+        if (request == CAMERA && result == LiveScanActivity.SAMPLE_FOUND) {
+            clearCapture(temp);
+            skipped();
+            return;
+        }
         if(result!=RESULT_OK||uri==null){clearCapture(temp);return;}
+        final boolean autoRead = request == CAMERA && data != null &&
+                !data.getBooleanExtra(LiveScanActivity.REVIEW_CROP, true);
         selected=null;classified=null;photo=null;error="";fieldMode=0;
         run("正在載入影像…",()->{
-            try{return CardPhoto.load(this,uri);}finally{if(temp!=null)runOnUiThread(()->clearCapture(temp));}
-        },p->{photo=p;preview();});
+            try {
+                return CardPhoto.load(this, uri, request == GALLERY);
+            } finally { if(temp!=null)runOnUiThread(()->clearCapture(temp)); }
+        }, item -> {
+            if (item == null) { skipped(); return; }
+            photo = item;
+            if (autoRead && config.ready()) classify();
+            else preview();
+        });
     }
     @Override protected void onSaveInstanceState(Bundle state){
         super.onSaveInstanceState(state);
@@ -311,6 +322,14 @@ public class MainActivity extends Activity {
         return new AzureReader(catalog, config);
     }
 
+    private void skipped() {
+        photo = null;
+        selected = null;
+        classified = null;
+        error = DeviceText.SKIPPED;
+        home();
+    }
+
     private void classify() {
         AzureReader api = createReader();
         Bitmap previewImage = photo.preview;
@@ -347,6 +366,7 @@ public class MainActivity extends Activity {
                 }
             }));
             if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
+            if (DeviceText.sample(reading.text)) return null;
             try {
                 history.add(reading);
             } catch (android.database.SQLException e) {
@@ -354,6 +374,7 @@ public class MainActivity extends Activity {
             }
             return reading;
         }, reading -> {
+            if (reading == null) { skipped(); return; }
             photo = null;
             selected = null;
             classified = null;
@@ -389,6 +410,8 @@ public class MainActivity extends Activity {
     private void rules() {
         ruleEditor = null;
         shell("rules", "辨識規則", this::home);
+        note(content, DeviceText.RULE);
+        ui.gap(content, 8);
         note(content, "選擇一個類型，編輯分類特徵與要讀取的欄位。");
         ui.gap(content, 12);
         content.addView(ui.action("新增自訂類型", false, () -> editRule(null)));

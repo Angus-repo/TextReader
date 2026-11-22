@@ -228,15 +228,118 @@ public class CardReaderTest {
         }
     }
 
-    @Test public void captureGivesCameraFullResolutionUri() throws Exception{
+    @Test public void instantScanOpensInternalScannerWithPrivateOutput() throws Exception{
         try(ActivityController<MainActivity> ctl=Robolectric.buildActivity(MainActivity.class).setup()){
-            Activity a=ctl.get();find(a.findViewById(android.R.id.content),"拍照").performClick();
+            Activity a=ctl.get();find(a.findViewById(android.R.id.content),"即時辨識").performClick();
             Intent intent=Shadows.shadowOf(a).getNextStartedActivityForResult().intent;
-            assertEquals(android.provider.MediaStore.ACTION_IMAGE_CAPTURE,intent.getAction());
-            Uri uri=intent.getParcelableExtra(android.provider.MediaStore.EXTRA_OUTPUT);assertTrue(CaptureProvider.file(a,uri).isFile());
-            assertTrue((intent.getFlags() & Intent.FLAG_GRANT_WRITE_URI_PERMISSION)!=0);
+            assertEquals(LiveScanActivity.class.getName(), intent.getComponent().getClassName());
+            Uri uri=intent.getData();assertTrue(CaptureProvider.file(a,uri).isFile());
+            assertEquals(0, intent.getFlags() & Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            ((MainActivity)a).onActivityResult(31, LiveScanActivity.SAMPLE_FOUND, null);
+            assertNotNull(find(a.findViewById(android.R.id.content), DeviceText.SKIPPED));
+            assertFalse(CaptureProvider.file(a, uri).exists());
         }
     }
+    @Test public void sampleRuleSkipsSpacedAndVerticalWatermarksAcrossAllTypes() throws Exception {
+        assertTrue(DeviceText.sample("發證日　樣　本"));
+        assertTrue(DeviceText.sample("姓名\n樣\n本\n民國"));
+        assertTrue(DeviceText.sample("样本"));
+        assertFalse(DeviceText.sample("樣式與正本"));
+        assertFalse(DeviceText.sample("本人"));
+        android.graphics.Rect first = new android.graphics.Rect(10, 10, 40, 40);
+        assertTrue(DeviceText.alignedGlyphs(first, new android.graphics.Rect(114, 12, 144, 42)));
+        assertTrue(DeviceText.alignedGlyphs(first, new android.graphics.Rect(10, 84, 40, 114)));
+        assertFalse(DeviceText.alignedGlyphs(first, new android.graphics.Rect(90, 84, 120, 114)));
+        try (ActivityController<OfflineActivity> ctl = Robolectric.buildActivity(OfflineActivity.class).setup()) {
+            OfflineActivity a = ctl.get();
+            a.reader = new AzureReader(catalog, config, (method, url, header, key, body) ->
+                reply(200, null, obj("result", obj("contents", new JSONArray().put(obj("markdown", "文件\n樣 本"))))), ms -> {});
+            setField(a, "config", config);
+            setField(a, "selected", "other");
+            setField(a, "photo", new CardPhoto(android.graphics.Bitmap.createBitmap(4, 4,
+                android.graphics.Bitmap.Config.ARGB_8888), new byte[]{1}));
+            java.lang.reflect.Method read = MainActivity.class.getDeclaredMethod("readText");
+            read.setAccessible(true);
+            read.invoke(a);
+            awaitText(a.findViewById(android.R.id.content), DeviceText.SKIPPED);
+            try (ReadingHistory store = new ReadingHistory(a)) { assertTrue(store.list().isEmpty()); }
+        }
+    }
+
+    @Test public void viewfinderUsesQuadrilateralAreaAndStableCorners() {
+        int w = 320, h = 200;
+        int[] gray = new int[w*h];
+        DocumentFrame near = null;
+        for (int margin : new int[]{15, 8, 1}) {
+            Arrays.fill(gray, 25);
+            for (int y = margin; y < h-margin; y++)
+                Arrays.fill(gray, y*w + margin, (y+1)*w - margin, 220);
+            DocumentFrame frame = DocumentFrame.detect(gray, w, h, null);
+            assertNotNull(frame);
+            if (margin == 15) assertTrue(frame.coverage < .8f);
+            if (margin == 8) {
+                assertTrue(frame.coverage >= .8f);
+                assertFalse(frame.clipped);
+                assertTrue(frame.closeTo(DocumentFrame.detect(gray, w, h, null)));
+                near = frame;
+            }
+            if (margin == 1) {
+                assertTrue(frame.clipped);
+                assertFalse(frame.closeTo(near));
+            }
+        }
+        Arrays.fill(gray, 180);
+        assertNull(DocumentFrame.detect(gray, w, h, null));
+        assertFalse(DeviceText.sharp(gray, w, h));
+        for (int i = 0; i < gray.length; i++) gray[i] = (i % w / 3 % 2) * 150;
+        assertTrue(DeviceText.sharp(gray, w, h));
+    }
+
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    public void tiltedDocumentCropContainsPaperAndRemovesOutsideBackground() {
+        android.graphics.Bitmap original = android.graphics.Bitmap.createBitmap(480, 320, android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas = new android.graphics.Canvas(original);
+        canvas.drawColor(android.graphics.Color.BLUE);
+        android.graphics.Path path = new android.graphics.Path();
+        path.moveTo(19, 22); path.lineTo(451, 10); path.lineTo(460, 304); path.lineTo(20, 302); path.close();
+        android.graphics.Paint paint = new android.graphics.Paint();
+        paint.setColor(android.graphics.Color.WHITE);
+        canvas.drawPath(path, paint);
+        DocumentFrame doc = DocumentFrame.detect(original, new android.graphics.Rect(75, 50, 390, 250));
+        assertNotNull(doc);
+        assertTrue(doc.coverage + " " + Arrays.toString(doc.corners), doc.coverage >= .80f && !doc.clipped);
+        android.graphics.Bitmap crop = doc.crop(original);
+        assertTrue(crop.getWidth() < original.getWidth() && crop.getHeight() < original.getHeight());
+        for (int x : new int[]{6, crop.getWidth()-7}) for (int y : new int[]{6, crop.getHeight()-7})
+            assertTrue(x + "," + y + " " + Arrays.toString(doc.corners), android.graphics.Color.red(crop.getPixel(x,y)) > 200);
+        crop.recycle(); original.recycle();
+    }
+
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    public void sharpBackgroundDoesNotPassForBlurryDocumentText() {
+        android.graphics.Bitmap image = android.graphics.Bitmap.createBitmap(320, 180, android.graphics.Bitmap.Config.ARGB_8888);
+        int[] pixels = new int[320*180];
+        for (int i = 0; i < pixels.length; i++) pixels[i] = i % 320 / 3 % 2 == 0 ? 0xff303030 : 0xffeeeeee;
+        image.setPixels(pixels, 0, 320, 0, 0, 320, 180);
+        android.graphics.Rect box = new android.graphics.Rect(70, 70, 220, 100);
+        java.util.List<android.graphics.Point> points = Arrays.asList(new android.graphics.Point(70,70),
+                new android.graphics.Point(220,70), new android.graphics.Point(220,100), new android.graphics.Point(70,100));
+        com.google.mlkit.vision.text.Text.Line line = new com.google.mlkit.vision.text.Text.Line(
+                "測試文字", box, points, "zh", null, Collections.emptyList(), 1, 0);
+        com.google.mlkit.vision.text.Text.TextBlock block = new com.google.mlkit.vision.text.Text.TextBlock(
+                "測試文字", box, points, "zh", null, Collections.singletonList(line));
+        com.google.mlkit.vision.text.Text recognized = new com.google.mlkit.vision.text.Text(
+                "測試文字", Collections.singletonList(block));
+        assertEquals(box, DeviceText.documentTextBounds(recognized, image));
+        assertTrue(DeviceText.legible(recognized, image, null));
+        android.graphics.Canvas canvas = new android.graphics.Canvas(image);
+        android.graphics.Paint paint = new android.graphics.Paint();
+        paint.setColor(0xffbbbbbb);
+        canvas.drawRect(65,65,225,105,paint);
+        assertFalse(DeviceText.legible(recognized, image, null));
+        image.recycle();
+    }
+
     @Test public void generalReaderRoutesAllTypesWithoutProvisioning() throws Exception {
         for (CardCatalog.Card type : catalog.cards.values()) {
             List<String> methods = new ArrayList<>();
@@ -272,6 +375,49 @@ public class CardReaderTest {
     public static class OfflineActivity extends MainActivity {
         AzureReader reader;
         @Override AzureReader createReader() { return reader; }
+    }
+
+    @Test @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    public void liveCropFlowsToBothServicesAndOptionalPreviewPausesUpload() throws Exception {
+        for (boolean review : new boolean[]{false, true}) {
+            try (ActivityController<OfflineActivity> ctl = Robolectric.buildActivity(OfflineActivity.class).setup()) {
+                OfflineActivity activity = ctl.get();
+                setField(activity, "config", config);
+                List<String> calls = Collections.synchronizedList(new ArrayList<>());
+                activity.reader = new AzureReader(catalog, config, (method, url, header, key, body) -> {
+                    if (url.endsWith(tw.codeviva.cardreader.Config.MS)) {
+                        calls.add("classify");
+                        return reply(200,null,obj("answers",obj(AzureReader.QUESTION,obj("type","choice","choice","other"))));
+                    }
+                    byte[] bytes = android.util.Base64.decode(body.getJSONArray("inputs").getJSONObject(0).getString("data"), 0);
+                    android.graphics.Bitmap uploaded = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                    assertEquals(600, uploaded.getWidth());
+                    assertEquals(370, uploaded.getHeight());
+                    uploaded.recycle();
+                    calls.add("read");
+                    return reply(200,null,obj("result",obj("contents",new JSONArray().put(obj("markdown","裁切文字")))));
+                }, ms -> {});
+                View root = activity.findViewById(android.R.id.content);
+                find(root, "即時辨識").performClick();
+                org.robolectric.shadows.ShadowActivity.IntentForResult req = Shadows.shadowOf(activity).getNextStartedActivityForResult();
+                java.io.File file = CaptureProvider.file(activity, req.intent.getData());
+                android.graphics.Bitmap crop = android.graphics.Bitmap.createBitmap(600,370,android.graphics.Bitmap.Config.ARGB_8888);
+                crop.eraseColor(android.graphics.Color.WHITE);
+                try (java.io.OutputStream out = new java.io.FileOutputStream(file)) {
+                    assertTrue(crop.compress(android.graphics.Bitmap.CompressFormat.JPEG, 95, out));
+                }
+                crop.recycle();
+                activity.onActivityResult(req.requestCode, Activity.RESULT_OK, new Intent().putExtra(LiveScanActivity.REVIEW_CROP, review));
+                if (review) {
+                    awaitText(root,"開始辨識");
+                    assertTrue(calls.isEmpty());
+                    find(root,"開始辨識").performClick();
+                }
+                awaitText(root,"辨識原文（JSON）");
+                assertEquals(Arrays.asList("classify","read"), calls);
+                assertFalse(file.exists());
+            }
+        }
     }
 
     @Test public void scanButtonClassifiesBeforeOcrAndCanPauseForReview() throws Exception {
@@ -705,7 +851,17 @@ public class CardReaderTest {
             if (find(root, text) != null) return;
             Thread.sleep(10);
         } while (System.nanoTime() < deadline);
-        fail("Missing screen text " + text);
+        fail("Missing screen text " + text + ", current UI " + visibleText(root));
+    }
+
+    private static String visibleText(View root) {
+        if (root instanceof TextView) return ((TextView)root).getText().toString();
+        StringBuilder values = new StringBuilder();
+        if (root instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup)root;
+            for (int i = 0; i < group.getChildCount(); i++) values.append(visibleText(group.getChildAt(i))).append(' ');
+        }
+        return values.toString().trim();
     }
 
     static View find(View v,String text){

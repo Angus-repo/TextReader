@@ -1,19 +1,23 @@
 # TextReader
 
-TextReader 是一個 Android 影像文字讀取工具。拍照或從相簿選圖後，由 Azure Decisions 判斷影像類型，再由 Azure Content Understanding 讀取全文。結果自動儲存在手機的「辨識紀錄」，同類型的多筆結果可分別開啟。
+TextReader 是一個 Android 影像文字讀取工具。即時裁切文件或從相簿選圖後，由 Azure Decisions 判斷影像類型，再由 Azure Content Understanding 讀取全文。結果自動儲存在手機的「辨識紀錄」，同類型的多筆結果可分別開啟。
 
-**[下載 TextReader 1.3.1 APK](https://github.com/Angus-repo/TextReader/raw/refs/heads/main/apk/TextReader-1.3.1.apk)**。支援 Android 9 以上，沿用 1.0.0「台灣證件讀取」的套件名稱、簽署憑證與連線設定。
+**[下載 TextReader 1.4.0 APK](https://github.com/Angus-repo/TextReader/raw/refs/heads/main/apk/TextReader-1.4.0.apk)**。支援 Android 9 以上，沿用 1.0.0「台灣證件讀取」的套件名稱、簽署憑證與連線設定。
 
 ## 使用方式
 
 1. 在「連線設定」選擇 Microsoft Decision 1.1 或 Azure OpenAI Decisions，填入 Azure 公有雲資源端點、實際部署名稱及金鑰。
 2. 填入 Content Understanding 資源端點與金鑰。全文辨識使用內建 OCR 分析器，可直接開始掃描。
-3. 點「拍照」或「從相簿選取」，預覽後按「開始辨識」。預設會依序完成分類與 OCR。勾選「讀取前讓我確認分類」即可在兩步之間更正類型。若分類失敗，保留同張照片，點「手動選擇類型」後按「讀取文字」即可繼續。
+3. 點「即時辨識」並允許相機權限。將文件放在取景框中央，邊框會隨文件移動，可切換橫框或直框。文件四角完整、占框內面積至少 80%、文字清晰且連續兩次位置穩定時會自動裁切並校正透視。也可點「從相簿選取」。即時辨識預設自動把裁切影像送往 Azure，可勾選「送出前先預覽裁切影像」調整這次的設定。相簿選圖則維持預覽後按「開始辨識」。預設會依序完成分類與 OCR。勾選「讀取前讓我確認分類」即可在兩步之間更正類型。若分類失敗，保留同張照片，點「手動選擇類型」後按「讀取文字」即可繼續。
 4. 結果頁上方固定顯示「欄位結果」，下方是預設收合的「辨識原文（JSON）」。健保卡只讀全文時也能依卡面排列整理姓名、身分證／居留證號、出生日期及完整卡號。展開「辨識原文（JSON）」可查看文件類型、欄位及逐行 OCR 原文，點「複製 JSON」可複製完整內容。若無可辨識的欄位，上方顯示提示。
 5. 在首頁的「辨識紀錄」可開啟歷史結果。同一套件及簽署金鑰覆蓋安裝 APK 時會沿用紀錄。1.2.4 及之前的版本僅暫存於記憶體，目前無可遷移的歷史檔案。
 6. 如要先解除安裝，先在首頁點「匯出備份」，選擇保存位置。備份是明文 JSON，含原文、當時的欄位規則及擷取結果。完成重裝後點「匯入備份」，可合併還原並略過重複紀錄。系統若在解除安裝時提供「保留應用程式資料」，也可以勾選。
 
 ## 依描述設定辨識規則
+
+即時辨識會以 ML Kit 偵測的文字位置配合四邊輪廓估計文件範圍，再用文件內文字區域的銳利度和連續畫面的四角位移判斷是否截取。
+
+即時辨識與相簿都會在手機上使用 ML Kit 中文文字辨識檢查「樣本」，含空格或換行也會跳過整張。Azure 若補讀到此字樣，結果也會略過。既有紀錄仍可開啟。首次使用需連網，讓 Google Play 服務下載中文辨識模型。
 
 在首頁點「辨識規則」，選擇內建類型或「新增自訂類型」。11 個內建類型已預填分類描述與共 63 個欄位的讀取說明。規則清單可預覽分類描述，點入後可修改。新增自訂類型時，可按「帶入內建範例」複製一份分類描述與欄位，再為新類型命名及調整。已自行儲存的類型優先使用手機上的版本，點「還原此類型的預設規則」可取代該類型的自訂內容。每個類型可設定：
 
@@ -35,7 +39,7 @@ TextReader 是一個 Android 影像文字讀取工具。拍照或從相簿選圖
 
 ## 資料處理
 
-App 支援系統截圖。上傳於使用者按下「開始辨識」後執行。縮圖傳送至 Decisions，重新編碼的影像傳送至 Content Understanding。辨識紀錄儲存在 App 私有資料庫，包含原文、欄位結果及辨識時的類型設定。照片和 Azure 金鑰不寫入辨識紀錄或匯出備份。首頁的「清除所有紀錄」可刪除本機歷史。相機暫存檔於載入後刪除，連線設定由 Android Keystore 提供的 AES-GCM 金鑰加密，停用系統自動備份。
+App 支援系統截圖。即時辨識會在裁切成功後上傳。若選擇先預覽或使用相簿，則於按下「開始辨識」後上傳。縮圖傳送至 Decisions，重新編碼的影像傳送至 Content Understanding。辨識紀錄儲存在 App 私有資料庫，包含原文、欄位結果及辨識時的類型設定。照片和 Azure 金鑰不寫入辨識紀錄或匯出備份。首頁的「清除所有紀錄」可刪除本機歷史。相機暫存檔於載入後刪除，連線設定由 Android Keystore 提供的 AES-GCM 金鑰加密，停用系統自動備份。
 
 ## 編譯與簽署
 
@@ -57,6 +61,8 @@ export TW_SIGN_PASSWORD_FILE="/private/signing/TWCardReader-signing-password.txt
 `app/src/main/assets/document-types.json` 定義分類標籤、分類判準及台灣證件欄位。測試以模擬回應驗證兩種 Decisions 格式、分類與 OCR 的先後順序、分析器選擇、欄位、無文字影像與畫面行為。
 
 ## 參考文件
+
+- [ML Kit Android 中文文字辨識](https://developers.google.com/ml-kit/vision/text-recognition/v2/android?hl=zh-tw)
 
 - [Microsoft Decision 1.1](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/how-to/use-foundry-models-microsoft-decision)
 - [Azure OpenAI Decisions](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/decisions)

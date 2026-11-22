@@ -41,6 +41,8 @@ final class RuleEditor {
         code = existingCode == null ? "doc_" + identifier() : existingCode;
         CardCatalog.Card card = catalog.cards.get(code);
         body.setFocusableInTouchMode(true);
+        body.addView(ui.text(DeviceText.RULE, 14, MUTED, false));
+        ui.gap(body, 12);
         if (card == null) {
             body.addView(ui.action("帶入內建範例", false, this::chooseTemplate));
             ui.gap(body, 12);
